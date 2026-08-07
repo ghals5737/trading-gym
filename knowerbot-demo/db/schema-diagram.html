@@ -1,0 +1,630 @@
+<title>유저 스탯 DB 스키마 — 모의투자 · 교육 퀴즈</title>
+<style>
+  :root {
+    --bg: #f7f4ee;
+    --ink: #23231d;
+    --soft: #6e695e;
+    --muted: #9a9488;
+    --green: #1b7a5a;
+    --green-chip: #e4f0e9;
+    --red: #b3432f;
+    --red-chip: #f7e8e4;
+    --amber: #9a6b12;
+    --amber-chip: #f6ecd8;
+    --line: #efeae0;
+    --white: #ffffff;
+    --code-bg: #f0ede4;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16150f;
+    --ink: #f2efe6;
+    --soft: #b9b2a2;
+    --muted: #8a8272;
+    --green: #4fceac;
+    --green-chip: #16352a;
+    --red: #e2795f;
+    --red-chip: #392019;
+    --amber: #d9ac52;
+    --amber-chip: #34290f;
+    --line: #2c2a22;
+    --white: #1d1c16;
+    --code-bg: #201e17;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16150f;
+      --ink: #f2efe6;
+      --soft: #b9b2a2;
+      --muted: #8a8272;
+      --green: #4fceac;
+      --green-chip: #16352a;
+      --red: #e2795f;
+      --red-chip: #392019;
+      --amber: #d9ac52;
+      --amber-chip: #34290f;
+      --line: #2c2a22;
+      --white: #1d1c16;
+      --code-bg: #201e17;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 64px 28px 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 44px;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.02em;
+  }
+  .badge {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--green);
+    color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+  }
+  h1 {
+    font-size: 30px;
+    line-height: 1.3;
+    margin: 10px 0 8px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--soft);
+    margin: 0;
+    max-width: 660px;
+  }
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--green-chip);
+    color: var(--green);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+    width: fit-content;
+  }
+  code {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .diagram-card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+  .diagram-card .mermaid {
+    min-width: 560px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 0 0 4px;
+    font-weight: 800;
+  }
+  .section-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  .table-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .table-card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .table-card .name {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--green);
+  }
+  .table-card p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--soft);
+  }
+  .domain-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .mapping-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .mapping-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    padding: 0 12px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .mapping-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  .mapping-table tr:last-child td { border-bottom: none; }
+  .ui-ref {
+    font-size: 12px;
+    color: var(--soft);
+  }
+  .tone-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+  }
+  .decision-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .decision {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px 20px;
+  }
+  .decision .q {
+    font-size: 13.5px;
+    font-weight: 800;
+    margin: 0 0 6px;
+  }
+  .decision .a {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--soft);
+    margin: 0;
+  }
+  @media (max-width: 640px) {
+    main { padding: 48px 18px 80px; }
+    h1 { font-size: 24px; }
+  }
+</style>
+
+<main>
+  <div>
+    <div class="eyebrow"><span class="badge">짐</span>트레이딩 짐 · 내부 설계 메모</div>
+    <h1>유저 스탯 DB 스키마 — 모의투자 · 교육 퀴즈</h1>
+    <p class="lede">
+      유저마다 다르게 쌓이는 데이터 — 모의투자 매매 기록, 습관 스탯, 위험 개입 반응, 상황퀴즈, XP,
+      교육 콘텐츠 진도/퀴즈 답변, KnowerBot 채팅 로그 — 를 <code>db/schema.sql</code>에 추가했어요. 기존
+      인증(<code>users</code>)·교육 콘텐츠(<code>education_*</code>) 스키마 위에 이어붙인 설계예요.
+    </p>
+  </div>
+
+  <div class="status-chip">✓ Postgres에 실제로 적용해서 문법·예시 쿼리 검증함 — 백엔드 엔티티/API는 아직 미구현</div>
+
+  <section>
+    <h2>전체 ER 다이어그램</h2>
+    <p class="section-sub">테이블 17개 전체 관계도 — 컬럼 상세는 아래 도메인별 다이어그램 참고</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    users ||--o{ simulation_sessions : "재도전마다"
+    users ||--o{ user_article_progress : ""
+    users ||--o{ user_quiz_answers : ""
+    users ||--o{ user_scenario_quiz_responses : ""
+    users ||--o{ xp_events : ""
+    users ||--o{ chat_messages : ""
+    users ||--|| ai_characters : "1:1"
+
+    simulation_sessions ||--o{ trades : ""
+    simulation_sessions ||--o{ session_stats : ""
+    simulation_sessions ||--o{ risk_interventions : ""
+    simulation_sessions |o--o{ xp_events : "출처가 simulation일 때"
+    trades |o--o{ risk_interventions : "개입 후 매매(있다면)"
+
+    education_articles ||--o{ education_quiz_questions : ""
+    education_articles ||--o{ education_chunks : "RAG 청크"
+    education_articles ||--o{ user_article_progress : ""
+    education_quiz_questions ||--o{ education_quiz_options : ""
+    education_quiz_questions ||--o{ user_quiz_answers : ""
+    education_quiz_options ||--o{ user_quiz_answers : "선택됨"
+
+    scenario_quiz_prompts ||--o{ scenario_quiz_options : ""
+    scenario_quiz_prompts ||--o{ user_scenario_quiz_responses : ""
+    scenario_quiz_options ||--o{ user_scenario_quiz_responses : "선택됨"
+      </pre>
+    </div>
+    <p class="section-sub" style="margin: 12px 0 0;">
+      점선 없이 실선 하나로 다 이어져 있지만 클러스터는 뚜렷해요 — <b>인증(users)</b>을 중심으로
+      <b>모의투자</b>(세션·매매·스탯·위험개입), <b>교육 콘텐츠</b>(글·퀴즈·RAG청크), <b>상황퀴즈</b>(독립 연습),
+      <b>XP/채팅</b>이 각각 유저에 매달려 있는 구조예요.
+    </p>
+  </section>
+
+  <section>
+    <h2>인증 · 교육 콘텐츠</h2>
+    <p class="section-sub">가장 먼저 만든 테이블들 — users는 백엔드 UserEntity.kt와 컬럼을 맞춰둔 참고용 문서</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    education_articles ||--o{ education_quiz_questions : "퀴즈 보유"
+    education_quiz_questions ||--o{ education_quiz_options : "선택지 보유"
+    education_articles ||--o{ education_chunks : "문단 단위로 청크화"
+
+    users {
+        uuid id PK
+        text username UK
+        text password_hash
+        timestamptz created_at
+    }
+
+    education_articles {
+        uuid id PK
+        text slug UK
+        enum category "기초개념·리스크관리 등 5종"
+        text title
+        text summary
+        text source "출처 기관"
+        text body "전체 본문"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    education_quiz_questions {
+        uuid id PK
+        uuid article_id FK
+        smallint position
+        text question
+    }
+
+    education_quiz_options {
+        uuid id PK
+        uuid question_id FK
+        smallint position
+        text label
+        boolean is_correct
+    }
+
+    education_chunks {
+        uuid id PK
+        uuid article_id FK
+        smallint chunk_index
+        text content "쪼개진 문단 텍스트"
+        vector embedding "1536차원"
+        timestamptz created_at
+    }
+      </pre>
+    </div>
+    <p class="section-sub" style="margin: 12px 0 0;">
+      RAG 검색 흐름(청크 임베딩 → 코사인 유사도 검색)은 파일 맨 아래 예시 쿼리 참고. education_chunks는
+      화면 표시용이 아니라 AI 검색 전용 — 글 목록/본문은 education_articles 한 행만 읽으면 됨.
+    </p>
+  </section>
+
+  <section>
+    <h2>모의투자 — 세션 · 매매 로그 · 스탯</h2>
+    <p class="section-sub">한 번의 "재도전 루프"가 세션 하나. 습관 스탯은 전부 trades에서 계산해 session_stats에 채움</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    users ||--o{ simulation_sessions : "세션 여러 번(재도전)"
+    simulation_sessions ||--o{ trades : "매매 로그"
+    simulation_sessions ||--o{ session_stats : "스탯 스냅샷"
+    simulation_sessions ||--o{ risk_interventions : "위험 개입 로그"
+    trades ||--o{ risk_interventions : "개입 후 실제 매매(있다면)"
+
+    simulation_sessions {
+        uuid id PK
+        uuid user_id FK
+        enum status "active·completed"
+        numeric starting_cash
+        numeric current_cash
+        date current_turn_date "시뮬레이션 오늘"
+        timestamptz started_at
+        timestamptz ended_at
+    }
+
+    trades {
+        uuid id PK
+        uuid session_id FK
+        text stock_code
+        enum side "buy·sell"
+        enum trade_type "normal·forced_liquidation"
+        boolean is_credit
+        numeric leverage_ratio
+        int quantity
+        numeric price
+        numeric day_open_price
+        numeric day_high_price
+        numeric day_low_price
+        boolean viewed_disclosure
+        enum reason_tag "손절·물타기·추격매수 등"
+        text reason_text
+        date simulated_trade_date
+    }
+
+    session_stats {
+        uuid id PK
+        uuid session_id FK
+        enum stat_key "8종 — 아래 표 참고"
+        smallint score_pct "0~100"
+        enum tone "red·amber·green"
+        text note "gambling_signal만 사용"
+    }
+
+    risk_interventions {
+        uuid id PK
+        uuid session_id FK
+        uuid trade_id FK "nullable"
+        enum risk_type "레버리지·몰빵·추격매수·손절지연"
+        text message
+        enum user_response "heeded·ignored"
+    }
+      </pre>
+    </div>
+
+    <div class="diagram-card" style="overflow-x:auto; margin-top: 14px;">
+      <table class="mapping-table">
+        <thead>
+          <tr><th>stat_key 값</th><th>한글 라벨</th><th>report 화면 위치</th><th>note 컬럼</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>judgment_accuracy</code></td>
+            <td>판단 정확도</td>
+            <td rowspan="3">report.metrics</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>disclosure_check_rate</code></td>
+            <td>공시 확인율</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>risk_management_score</code></td>
+            <td>리스크 관리</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>impulsive_trading</code></td>
+            <td>이슈 따라 사기 (뇌동매매)</td>
+            <td rowspan="4">report.habits</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>loss_aversion</code></td>
+            <td>손해 보면 못 파는 마음</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>confirmation_bias</code></td>
+            <td>공시 없이 판단하기</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>diversification</code></td>
+            <td>나눠 담는 습관 (몰빵의 반대 프레이밍)</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>gambling_signal</code></td>
+            <td>도박성 매매 신호</td>
+            <td>report.gamblingSignal</td>
+            <td>사용함 — 경고 문구 원문</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>상황퀴즈 — /quiz의 독립적인 판단 퀴즈</h2>
+    <p class="section-sub">교육 콘텐츠 퀴즈와는 다른 개념(정답 없음)이지만, 모의투자 세션에도 종속되지 않음 — /simulation과 별개 화면이라 유저 단위로만 기록</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    scenario_quiz_prompts ||--o{ scenario_quiz_options : "선택지"
+    users ||--o{ user_scenario_quiz_responses : "응답 로그"
+    scenario_quiz_prompts ||--o{ user_scenario_quiz_responses : ""
+    scenario_quiz_options ||--o{ user_scenario_quiz_responses : "선택됨"
+
+    scenario_quiz_prompts {
+        uuid id PK
+        text headline
+        text context
+        text feedback_template
+        int xp_reward
+    }
+    scenario_quiz_options {
+        uuid id PK
+        uuid prompt_id FK
+        smallint position
+        text label
+        text hint
+        enum behavior_tag "session_stat_key 재사용"
+    }
+    user_scenario_quiz_responses {
+        uuid id PK
+        uuid user_id FK
+        uuid prompt_id FK
+        uuid selected_option_id FK
+        int xp_gained
+        timestamptz answered_at
+    }
+      </pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>AI 캐릭터 / XP · 교육 진도 · 채팅</h2>
+    <p class="section-sub">캐릭터·XP·채팅은 세션이 아니라 유저 단위로 누적 — 재도전해도 안 사라짐</p>
+    <div class="diagram-card">
+      <pre class="mermaid">
+erDiagram
+    users ||--|| ai_characters : "1:1"
+    users ||--o{ xp_events : "XP 획득 로그"
+    users ||--o{ user_article_progress : "글 완독"
+    users ||--o{ user_quiz_answers : "퀴즈 답변"
+    users ||--o{ chat_messages : "채팅 로그"
+    education_articles ||--o{ user_article_progress : ""
+    education_quiz_questions ||--o{ user_quiz_answers : ""
+
+    ai_characters {
+        uuid user_id PK_FK
+        text name
+        smallint level
+        int xp "xp_events 합계 캐시"
+        int xp_to_next
+        text tier
+    }
+    xp_events {
+        uuid id PK
+        uuid user_id FK
+        enum source "simulation·pt·scenario_quiz·education_quiz"
+        int amount
+        uuid session_id FK "nullable"
+    }
+    user_article_progress {
+        uuid user_id PK_FK
+        uuid article_id PK_FK
+        timestamptz completed_at
+    }
+    user_quiz_answers {
+        uuid id PK
+        uuid user_id FK
+        uuid question_id FK
+        uuid selected_option_id FK
+        boolean is_correct "응답 시점 스냅샷"
+    }
+    chat_messages {
+        uuid id PK
+        uuid user_id FK
+        enum role "user·assistant"
+        text content
+        timestamptz created_at
+    }
+      </pre>
+    </div>
+    <p class="section-sub" style="margin: 12px 0 0;">
+      채팅 답변-청크 매핑을 저장하는 별도 테이블은 없음 — 맞춤 추천 시점에 최근
+      <code>role='user'</code> 메시지를 <code>education_chunks</code>에 그때그때 재검색(RAG)해서 씀.
+    </p>
+  </section>
+
+  <section>
+    <h2>report 화면 ↔ DB 매핑</h2>
+    <p class="section-sub"><code>lib/mock-data.ts</code>의 report 객체가 실제로 어느 테이블/쿼리에서 나오는지</p>
+    <div class="diagram-card" style="overflow-x:auto;">
+      <table class="mapping-table">
+        <thead>
+          <tr><th>화면</th><th>필드</th><th>DB 소스</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ui-ref">report.metrics</td>
+            <td>판단 정확도 · 공시 확인율 · 리스크 관리</td>
+            <td><code>session_stats</code> 최신 세션 3행 (<code>judgment_accuracy</code> / <code>disclosure_check_rate</code> / <code>risk_management_score</code>)</td>
+          </tr>
+          <tr>
+            <td class="ui-ref">report.habits</td>
+            <td>뇌동매매 · 손실회피 · 확증편향 · 분산</td>
+            <td><code>session_stats</code> 같은 세션의 나머지 4행 (<code>impulsive_trading</code> 등) — <code>tone</code> 컬럼이 그대로 red/amber/green</td>
+          </tr>
+          <tr>
+            <td class="ui-ref">report.growth</td>
+            <td>이전 → 현재 비교</td>
+            <td>최근 완료 세션 2개를 <code>stat_key</code>로 조인 (파일 맨 아래 예시 쿼리)</td>
+          </tr>
+          <tr>
+            <td class="ui-ref">report.gamblingSignal</td>
+            <td>level + note</td>
+            <td><code>session_stats</code>의 <code>gambling_signal</code> 행 — 유일하게 <code>note</code>를 채워서 서술형 카드까지 backing</td>
+          </tr>
+          <tr>
+            <td class="ui-ref">aiCharacter</td>
+            <td>레벨·XP·XP 출처별 합계</td>
+            <td><code>ai_characters</code> (현재값) + <code>xp_events</code>를 <code>source</code>로 group by</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>설계 판단 메모</h2>
+    <p class="section-sub">왜 이렇게 나눴는지 — 나중에 다시 볼 때를 위한 근거</p>
+    <div class="decision-list">
+      <div class="decision">
+        <p class="q">보유 종목(holdings) 테이블을 왜 안 만들었나?</p>
+        <p class="a">세션의 trades를 종목별로 합산하면 바로 나와요. 하커톤 규모(세션당 매매 수십 건)에서는 매번 재계산해도 충분히 가벼워서, 정합성 깨질 여지가 있는 별도 스냅샷 테이블을 안 만들었어요. 거래량이 커지면 그때 캐시 테이블을 추가하면 됨.</p>
+      </div>
+      <div class="decision">
+        <p class="q">trades에 그날 시가/고가/저가를 왜 같이 저장하나?</p>
+        <p class="a">KRX 일봉 데이터는 외부 소스라, 나중에 "이게 추격매수였나?" 같은 판단을 하려면 매매 시점의 그날 가격 맥락이 필요해요. 매매 시점에 스냅샷을 남겨두면 외부 데이터를 다시 조인하지 않고 이 행 하나로 습관 판정이 가능해요.</p>
+      </div>
+      <div class="decision">
+        <p class="q">report.metrics(3개)랑 report.habits(4개)를 왜 한 테이블(session_stats)로 합쳤나?</p>
+        <p class="a">구조가 완전히 같아요(label + 0~100 값 + 톤). 따로 테이블 둘 두면 growth 비교 쿼리도 두 번 짜야 하고, 나중에 새 지표가 metrics 성격인지 habits 성격인지 애매한 것도 생겨요. <code>stat_key</code> enum 하나로 통합하고 <code>gambling_signal</code>까지 같은 테이블에 넣어서, 세션 리포트 전체를 <code>select * from session_stats where session_id=?</code> 한 방으로 가져올 수 있게 했어요.</p>
+      </div>
+      <div class="decision">
+        <p class="q">매매 이유(reason_tag/reason_text)는 왜 넣었나?</p>
+        <p class="a">"안 좋은 투자" 논의에서 나온 결론 — 결과가 아니라 과정(원칙을 지켰는지)을 평가하려면, 그 순간 사용자가 뭐라고 생각했는지가 있어야 말한 것과 실제 행동의 불일치를 잡을 수 있어요. 이전 대화에서 합의했는데 스키마에 반영이 안 돼 있던 걸 이번에 넣었어요.</p>
+      </div>
+      <div class="decision">
+        <p class="q">XP/캐릭터는 왜 세션이 아니라 유저 단위로 뒀나?</p>
+        <p class="a">재도전 루프의 핵심은 "학습 후 다시 도전해서 성장했는지"예요. 세션마다 XP가 초기화되면 성장의 의미가 없어져서, <code>ai_characters</code>는 유저 1명당 1행으로 계속 누적되게 설계했어요. 세션은 습관 스탯 비교(before/after)에만 쓰이고, XP는 별개로 계속 쌓여요.</p>
+      </div>
+      <div class="decision">
+        <p class="q">상황퀴즈(scenario_quiz_*)는 왜 세션에 안 묶었나?</p>
+        <p class="a">처음엔 <code>session_scenario_quiz_responses</code>로 세션 종속이었는데, 실제 화면에서 <code>/quiz</code>가 <code>/simulation</code>과 완전히 분리된 독립 라우트라서 정정함. <code>user_scenario_quiz_responses</code>로 유저 단위만 연결하고, 응답은 <code>session_stats</code>엔 반영 안 돼요(XP만 지급) — 대신 <code>behavior_tag</code>는 채점용이 아니라 "지금 어떤 습관 축이 약한 유저에게 어떤 프롬프트를 보여줄지" 타겟팅용으로만 씀.</p>
+      </div>
+      <div class="decision">
+        <p class="q">맞춤 추천(교육자료/퀴즈)은 어떤 데이터를 근거로 만드나?</p>
+        <p class="a">룰 기반 신호를 먼저 합침 — <code>session_stats</code>의 약한 축, <code>trades.reason_tag</code> 반복 패턴, <code>risk_interventions</code> 무시율, <code>user_quiz_answers</code> 오답 카테고리, 그리고 <code>chat_messages</code>(role='user')를 그때그때 <code>education_chunks</code>에 RAG 재검색한 결과. 이 후보군까지는 전부 결정론적 SQL이고, AI는 "왜 지금 이걸 추천하는지" 설명 문구만 생성함 — 숫자는 룰, 해석은 AI라는 원칙 그대로.</p>
+      </div>
+    </div>
+  </section>
+</main>

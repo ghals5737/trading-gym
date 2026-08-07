@@ -1,0 +1,1801 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>트레이딩 짐 - KnowerBot 오버레이 테스트</title>
+<style>
+  :root {
+    --bg: #f7f4ee;
+    --ink: #23231d;
+    --soft: #6e695e;
+    --muted: #9a9488;
+    --green: #1b7a5a;
+    --green-chip: #e4f0e9;
+    --line: #efeae0;
+    --chip: #ede8dd;
+    --white: #ffffff;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16150f;
+    --ink: #f2efe6;
+    --soft: #b9b2a2;
+    --muted: #8a8272;
+    --green: #4fceac;
+    --green-chip: #16352a;
+    --line: #2c2a22;
+    --chip: #232019;
+    --white: #1d1c16;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16150f;
+      --ink: #f2efe6;
+      --soft: #b9b2a2;
+      --muted: #8a8272;
+      --green: #4fceac;
+      --green-chip: #16352a;
+      --line: #2c2a22;
+      --chip: #232019;
+      --white: #1d1c16;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+  }
+  #page {
+    position: relative;
+    z-index: 1;
+    max-width: 1080px;
+    margin: 0 auto;
+    min-height: 100vh;
+    padding: 120px 32px 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    text-align: center;
+  }
+  body.show-results #page {
+    z-index: 9;
+    max-width: 1120px;
+    padding-top: 72px;
+  }
+  body.show-results #seat-shadow,
+  body.show-results #bot-bubble,
+  body.show-results #bot-hitbox,
+  body.show-results #hud {
+    visibility: hidden;
+  }
+  body.show-results #stage {
+    z-index: 10;
+    visibility: visible;
+  }
+  body:not(.logged-in) #page {
+    filter: blur(8px);
+    opacity: 0.52;
+    transform: scale(1.015);
+    pointer-events: none;
+    user-select: none;
+  }
+  body.logged-in #page {
+    filter: none;
+    opacity: 1;
+    transform: none;
+    transition: filter 0.28s ease, opacity 0.28s ease, transform 0.28s ease;
+  }
+  body:not(.logged-in) #stage,
+  body:not(.logged-in) #seat-shadow,
+  body:not(.logged-in) #bot-bubble,
+  body:not(.logged-in) #bot-hitbox,
+  body:not(.logged-in) #chat-panel,
+  body:not(.logged-in) #hud {
+    visibility: hidden;
+  }
+  #login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      linear-gradient(rgba(247, 244, 238, 0.86), rgba(247, 244, 238, 0.94)),
+      radial-gradient(circle at 50% 24%, rgba(27, 122, 90, 0.14), transparent 42%);
+    transition: opacity 0.24s ease, visibility 0.24s ease;
+  }
+  body.logged-in #login-overlay {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .login-modal {
+    width: min(420px, calc(100vw - 32px));
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--white) 94%, transparent);
+    box-shadow: 0 28px 80px rgba(28, 32, 24, 0.18);
+    backdrop-filter: blur(14px);
+  }
+  .login-modal h2 {
+    margin: 0 0 8px;
+    font-size: 24px;
+    line-height: 1.25;
+  }
+  .login-modal p {
+    margin: 0 0 22px;
+    color: var(--soft);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .login-form {
+    display: grid;
+    gap: 10px;
+  }
+  .login-form input {
+    height: 46px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--white);
+    color: var(--ink);
+    padding: 0 13px;
+    font: inherit;
+    font-size: 14px;
+  }
+  .login-form button {
+    height: 48px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--green);
+    color: white;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.02em;
+  }
+  .badge {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--green);
+    color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    max-width: 640px;
+  }
+  h1 {
+    font-size: 44px;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    margin: 0;
+    font-weight: 800;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px;
+    line-height: 1.7;
+    color: var(--soft);
+    margin: 0;
+    max-width: 560px;
+  }
+  .survey-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .hidden-seat-target {
+    position: fixed;
+    left: 50%;
+    top: 46%;
+    width: 180px;
+    height: 88px;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  #result-page {
+    display: none;
+    width: min(920px, 100%);
+  }
+  body.show-results #intro-page {
+    display: none;
+  }
+  body.show-results #result-page {
+    display: block;
+  }
+  body.show-sim #intro-page,
+  body.show-sim #result-page {
+    display: none;
+  }
+  body.show-sim #simulation-page {
+    display: block;
+  }
+  body.show-sim #page {
+    z-index: 9;
+    max-width: 1240px;
+    padding: 34px 24px 72px;
+    align-items: stretch;
+    justify-content: flex-start;
+    text-align: left;
+  }
+  body.show-sim #seat-shadow,
+  body.show-sim #bot-bubble,
+  body.show-sim #bot-hitbox,
+  body.show-sim #chat-panel,
+  body.show-sim #hud {
+    visibility: hidden;
+  }
+  body.show-sim #stage {
+    z-index: 10;
+    visibility: visible;
+  }
+  .result-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .result-head h1 {
+    font-size: 38px;
+  }
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    text-align: left;
+  }
+  .result-model-space {
+    height: 260px;
+    margin-top: 18px;
+  }
+  .result-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .summary-card {
+    margin-bottom: 16px;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: center;
+    background: color-mix(in srgb, var(--white) 94%, transparent);
+  }
+  .summary-score {
+    min-width: 112px;
+    min-height: 86px;
+    border-radius: 14px;
+    background: var(--green);
+    color: white;
+    display: grid;
+    place-items: center;
+    font-size: 28px;
+    font-weight: 900;
+  }
+  .result-card {
+    min-height: 150px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--white) 88%, transparent);
+    padding: 18px;
+    box-shadow: 0 16px 36px rgba(28, 32, 24, 0.08);
+  }
+  .result-card h3 {
+    margin: 0 0 10px;
+    font-size: 15px;
+  }
+  .result-card p {
+    margin: 0;
+    color: var(--soft);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  #simulation-page {
+    display: none;
+    width: min(1120px, 100%);
+    text-align: left;
+  }
+  .sim-shell {
+    background: #f6f2ea;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    padding: 0 0 26px;
+    box-shadow: 0 22px 60px rgba(28, 32, 24, 0.08);
+    overflow: hidden;
+  }
+  .sim-topline {
+    margin: 0 0 14px;
+    color: #bbb5aa;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .sim-nav {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    background: #fff;
+    border-radius: 0;
+    padding: 0 22px;
+    border-bottom: 1px solid #ede8df;
+  }
+  .sim-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 900;
+    color: #23231d;
+  }
+  .sim-brand::before {
+    content: "짐";
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    background: var(--green);
+    color: #fff;
+    font-size: 10px;
+  }
+  .sim-nav a {
+    color: #8d867a;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .sim-nav a.active {
+    min-height: 22px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: var(--green-chip);
+    color: var(--green);
+  }
+  .sim-nav .sim-status {
+    margin-left: auto;
+    text-align: right;
+    color: #9b9489;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+  .sim-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.8fr);
+    gap: 18px;
+    padding: 28px 74px 10px;
+  }
+  .sim-card {
+    background: #fff;
+    border: 1px solid #eee9e0;
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .portfolio-card {
+    min-height: 226px;
+  }
+  .sim-label {
+    margin: 0 0 4px;
+    color: #80786c;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .sim-balance {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .sim-balance strong {
+    font-size: 26px;
+    line-height: 1;
+  }
+  .sim-balance span {
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .sim-chart {
+    height: 118px;
+    border-radius: 8px;
+    background: #fde8e5;
+    overflow: hidden;
+  }
+  .sim-news {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 0 12px;
+    background: #fff;
+    border: 1px solid #eee9e0;
+    border-radius: 8px;
+    color: #777064;
+    font-size: 11px;
+  }
+  .sim-news span {
+    background: var(--green-chip);
+    color: var(--green);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-weight: 800;
+  }
+  .sim-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .sim-stat {
+    min-height: 52px;
+    background: #fff;
+    border: 1px solid #eee9e0;
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .sim-stat small {
+    display: block;
+    margin-bottom: 4px;
+    color: #a49c90;
+    font-size: 10px;
+    font-weight: 800;
+  }
+  .sim-stat strong {
+    font-size: 12px;
+  }
+  .trainer-card {
+    min-height: 226px;
+  }
+  .trainer-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .trainer-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--green-chip);
+    color: var(--green);
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 900;
+  }
+  .trainer-card p {
+    margin: 8px 0 16px;
+    color: #6e695e;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .trade-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .trade-grid button {
+    min-height: 38px;
+    border-radius: 10px;
+    border: 1px solid #eadfcb;
+    background: #fff6df;
+    color: #c38815;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  .trade-grid button.primary {
+    background: var(--green);
+    color: white;
+    border-color: var(--green);
+  }
+  .result-tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: var(--green-chip);
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 800;
+    margin-bottom: 12px;
+  }
+  .cta-row { display: flex; gap: 12px; margin-top: 8px; }
+  .btn {
+    height: 52px;
+    padding: 0 32px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--green); color: white; }
+  .btn-secondary { background: var(--white); color: var(--ink); border-color: var(--line); }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .card {
+    position: relative;
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: visible;
+    transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+  }
+  .card.knower-seat-active {
+    transform: translateY(4px);
+    border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+    box-shadow: 0 18px 34px rgba(32, 38, 28, 0.12), inset 0 7px 0 rgba(27, 122, 90, 0.08);
+  }
+  .card.knower-seat-active::before {
+    content: "";
+    position: absolute;
+    left: 22%;
+    right: 22%;
+    top: -5px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(27, 122, 90, 0.22);
+    filter: blur(0.2px);
+  }
+  .card .icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--green-chip);
+    color: var(--green);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .card h3 { font-size: 15px; margin: 0; font-weight: 700; }
+  .card p { font-size: 13px; line-height: 1.6; color: var(--soft); margin: 0; }
+  .floor-note {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    padding-top: 8px;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: block;
+    pointer-events: none;
+  }
+  #hud {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 6;
+    padding: 10px 16px;
+    background: color-mix(in srgb, var(--white) 70%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    font-size: 11px;
+    color: var(--muted);
+    pointer-events: none;
+    max-width: 220px;
+    line-height: 1.5;
+  }
+  #hud b { color: var(--ink); }
+  #seat-shadow {
+    position: fixed;
+    z-index: 4;
+    width: 118px;
+    height: 24px;
+    margin-left: -59px;
+    margin-top: -12px;
+    border-radius: 999px;
+    background: radial-gradient(ellipse at center, rgba(24, 28, 22, 0.34) 0%, rgba(24, 28, 22, 0.18) 48%, rgba(24, 28, 22, 0) 78%);
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(0.75);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+  #seat-shadow.active {
+    opacity: 1;
+    transform: scale(1);
+  }
+  #bot-bubble {
+    position: fixed;
+    z-index: 7;
+    max-width: min(260px, calc(100vw - 32px));
+    padding: 10px 13px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(35, 35, 29, 0.1);
+    box-shadow: 0 12px 30px rgba(28, 32, 24, 0.14);
+    color: #23231d;
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 650;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -100%) translateY(0) scale(0.96);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    backdrop-filter: blur(10px);
+  }
+  #bot-bubble::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -7px;
+    width: 14px;
+    height: 14px;
+    background: inherit;
+    border-right: 1px solid rgba(35, 35, 29, 0.1);
+    border-bottom: 1px solid rgba(35, 35, 29, 0.1);
+    transform: translateX(-50%) rotate(45deg);
+  }
+  #bot-bubble.active {
+    opacity: 1;
+    transform: translate(-50%, -100%) translateY(0) scale(1);
+  }
+  #bot-hitbox {
+    position: fixed;
+    z-index: 8;
+    width: 86px;
+    height: 118px;
+    margin-left: -43px;
+    margin-top: -92px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  #bot-hitbox:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 3px;
+  }
+  #chat-panel {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    z-index: 7;
+    width: min(760px, calc(100vw - 32px));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--white) 92%, transparent);
+    box-shadow: 0 24px 70px rgba(28, 32, 24, 0.2);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 28px) scale(0.96);
+    transition: opacity 0.24s ease, transform 0.24s ease;
+  }
+  #chat-panel.open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0) scale(1);
+  }
+  .chat-head {
+    width: 100%;
+    min-height: 54px;
+    border: 0;
+    padding: 14px 18px;
+    background: transparent;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: default;
+  }
+  .chat-head span:last-child {
+    color: var(--green);
+    font-size: 11px;
+  }
+  .chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    max-height: 260px;
+    padding: 0 18px 12px;
+    overflow: auto;
+  }
+  .chat-msg {
+    max-width: 84%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .chat-msg.bot {
+    align-self: flex-start;
+    background: var(--green-chip);
+    color: var(--ink);
+  }
+  .chat-msg.user {
+    align-self: flex-end;
+    background: var(--green);
+    color: white;
+  }
+  .chat-form {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--line);
+  }
+  #chat-input {
+    min-width: 0;
+    flex: 1;
+    height: 46px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--white);
+    color: var(--ink);
+    padding: 0 11px;
+    font: inherit;
+    font-size: 14px;
+  }
+  #chat-form button {
+    width: 64px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--green);
+    color: white;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  @media (max-width: 720px) {
+    .card-grid { grid-template-columns: repeat(2, 1fr); }
+    h1 { font-size: 30px; }
+    .result-grid { grid-template-columns: 1fr; }
+    body.show-sim #page {
+      padding: 20px 12px 48px;
+    }
+    .sim-main {
+      grid-template-columns: 1fr;
+      padding: 18px 12px 8px;
+    }
+    .sim-nav {
+      height: auto;
+      min-height: 54px;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 10px 14px;
+    }
+    .sim-nav .sim-status {
+      width: 100%;
+      margin-left: 0;
+      text-align: left;
+    }
+    .sim-stats {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .result-actions {
+      flex-direction: column;
+    }
+    #chat-panel {
+      bottom: 12px;
+      width: min(560px, calc(100vw - 24px));
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="login-overlay">
+  <div class="login-modal">
+    <h2>트레이딩 짐 로그인</h2>
+    <p>목업용 로그인입니다. 아무 값이나 입력하면 KnowerBot 데모로 들어갑니다.</p>
+    <form class="login-form" id="login-form">
+      <input id="login-id" autocomplete="username" placeholder="아이디" />
+      <input id="login-password" autocomplete="current-password" placeholder="비밀번호" type="password" />
+      <button type="submit">입장하기</button>
+    </form>
+  </div>
+</div>
+
+<div id="page">
+  <div id="intro-page">
+    <div>
+      <div class="eyebrow"><span class="badge">짐</span>사전 조사</div>
+    </div>
+    <div class="hero">
+      <h1>어서오세요</h1>
+      <p class="lede">KnowerBot이 몇 가지 질문으로 투자 성향과 리스크 감내도를 확인할게요.</p>
+      <p class="survey-note">답변은 맞춤형 모의투자 코스 추천에만 사용됩니다.</p>
+    </div>
+    <div class="floor-note">사전 조사 준비 중</div>
+  </div>
+  <div id="result-page">
+    <div class="result-head">
+      <div class="eyebrow"><span class="badge">짐</span>사전 조사 결과</div>
+      <h1>맞춤 연습 코스가 준비됐어요</h1>
+      <p class="lede">대화 내용을 바탕으로 첫 모의투자 훈련 방향을 정리했습니다.</p>
+    </div>
+    <div class="result-card summary-card">
+      <div>
+        <span class="result-tag">요약</span>
+        <h3>리스크 기준을 먼저 잡으면 빠르게 성장할 수 있어요</h3>
+        <p>현재 응답 기준으로는 기본 투자 개념은 이해하고 있지만, 포지션 크기와 손절 기준을 명확히 정하는 훈련이 우선입니다.</p>
+      </div>
+      <div class="summary-score">B+</div>
+    </div>
+    <div class="result-grid">
+      <div class="result-card">
+        <span class="result-tag">성향</span>
+        <h3>균형 탐색형</h3>
+        <p>수익 기회에는 관심이 있지만, 손실 폭이 커지는 구간에서는 빠른 피드백이 필요한 유형입니다.</p>
+      </div>
+      <div class="result-card">
+        <span class="result-tag">리스크</span>
+        <h3>중간 민감도</h3>
+        <p>레버리지와 손절 기준을 먼저 정하면 안정적으로 훈련을 이어갈 수 있습니다.</p>
+      </div>
+      <div class="result-card">
+        <span class="result-tag">추천</span>
+        <h3>초기 리스크 제어 코스</h3>
+        <p>첫 세션은 포지션 크기 제한, 손절 기준 설정, 연속 손실 대응 연습으로 시작하세요.</p>
+      </div>
+    </div>
+    <div class="result-model-space" aria-hidden="true"></div>
+    <div class="result-actions">
+      <button class="btn btn-primary" id="go-sim" type="button">모의투자 하러가기</button>
+      <button class="btn btn-secondary" type="button">투자 교육받기</button>
+    </div>
+  </div>
+  <div id="simulation-page">
+    <p class="sim-topline">06_스파링_던져모의투자</p>
+    <div class="sim-shell">
+      <nav class="sim-nav">
+        <div class="sim-brand">트레이딩 짐</div>
+        <a>리와인드</a>
+        <a class="active">스파링</a>
+        <a>나의 리포트</a>
+        <a>오늘의 PT</a>
+        <div class="sim-status">스파링 시즌 1 · 2020 금융장에서 살아남기<br />내 자산 10,000,000원</div>
+      </nav>
+      <main class="sim-main">
+        <section>
+          <div class="sim-card portfolio-card">
+            <p class="sim-label">대형전자 A <span>코스피 · 대형 처리</span></p>
+            <div class="sim-balance"><strong>54,000원</strong><span>1/10턴</span><small>2020년 3월 2일 주간</small></div>
+            <div class="sim-chart">
+              <svg viewBox="0 0 520 118" width="100%" height="100%" preserveAspectRatio="none">
+                <polyline points="8,30 70,45 128,42 180,66 238,78 292,68 340,92" fill="none" stroke="#ef4b32" stroke-width="2.5" />
+              </svg>
+            </div>
+          </div>
+          <div class="sim-news"><span>뉴스</span>감염병 확산 공포... 글로벌 증시 동반 급락 시작</div>
+          <div class="sim-stats">
+            <div class="sim-stat"><small>남은 현금</small><strong>10,000,000원</strong></div>
+            <div class="sim-stat"><small>보유 주식</small><strong>없음</strong></div>
+            <div class="sim-stat"><small>발동권</small><strong>0원</strong></div>
+            <div class="sim-stat"><small>위험 정도</small><strong>안정적</strong></div>
+          </div>
+        </section>
+        <aside class="sim-card trainer-card" data-sim-trainer-seat>
+          <div class="trainer-head">
+            <div class="trainer-icon">트</div>
+            <div>
+              <p class="sim-label">AI 트레이너</p>
+              <small>리스크와 현재 판단을 점검해요</small>
+            </div>
+          </div>
+          <p>스파링 시즌 1이에요. 2020년 급락장을 주 단위 턴으로 다시 살아볼 거예요. 매 턴 뉴스가 갱신되고, 선택의 결과는 다음 턴에 바로 드러나요.</p>
+          <div class="trade-grid">
+            <button class="primary">매수 · 현금 50%</button>
+            <button>신용 매수 · 1.5배</button>
+            <button>전량 매도</button>
+            <button>관망 → 다음 턴</button>
+          </div>
+        </aside>
+      </main>
+    </div>
+  </div>
+  <div class="hidden-seat-target" data-knower-seat></div>
+</div>
+
+<canvas id="stage"></canvas>
+<div id="seat-shadow"></div>
+<div id="bot-bubble"></div>
+<button id="bot-hitbox" type="button" aria-label="KnowerBot과 대화하기"></button>
+<section id="chat-panel" aria-label="KnowerBot 채팅">
+  <div class="chat-head" id="chat-toggle"><span>KnowerBot 대화</span><span>온라인</span></div>
+  <div class="chat-log" id="chat-log">
+    <div class="chat-msg bot">필요하면 저를 눌러서 불러주세요.</div>
+  </div>
+  <form class="chat-form" id="chat-form">
+    <input id="chat-input" autocomplete="off" placeholder="메시지 입력" />
+    <button type="submit">전송</button>
+  </form>
+</section>
+<div id="hud"><b>KnowerBot 오버레이 테스트</b><br />3D 캐릭터가 2D 페이지 위를 자유롭게 떠다녀요.</div>
+
+<script>
+__THREE_BUNDLE_JS__
+</script>
+
+<script>
+(function(){
+const THREE = window.THREE;
+const GLTFLoader = THREE.GLTFLoader;
+
+const MODEL_URL = "data:model/gltf-binary;base64,__MODEL_GLB_B64__";
+const TEXTURE_URLS = {
+  map: "data:image/png;base64,__ALBEDO_PNG_B64__",
+  normalMap: "data:image/png;base64,__NORMAL_PNG_B64__",
+  metalnessMap: "data:image/png;base64,__METALNESS_PNG_B64__",
+  roughnessMap: "data:image/png;base64,__ROUGHNESS_PNG_B64__",
+  emissiveMap: "data:image/png;base64,__EMISSION_PNG_B64__",
+};
+const ANIMATION_URLS = {
+  idle: "data:model/gltf-binary;base64,__IDLE_GLB_B64__",
+  walking: "data:model/gltf-binary;base64,__WALKING_GLB_B64__",
+  jump: "data:model/gltf-binary;base64,__JUMP_GLB_B64__",
+  jumpDown: "data:model/gltf-binary;base64,__JUMP_DOWN_GLB_B64__",
+  sitting: "data:model/gltf-binary;base64,__SITTING_GLB_B64__",
+  flair: "data:model/gltf-binary;base64,__FLAIR_GLB_B64__",
+};
+
+const canvas = document.getElementById('stage');
+const loginFormEl = document.getElementById('login-form');
+const seatShadowEl = document.getElementById('seat-shadow');
+const bubbleEl = document.getElementById('bot-bubble');
+const hitboxEl = document.getElementById('bot-hitbox');
+const chatPanelEl = document.getElementById('chat-panel');
+const chatToggleEl = document.getElementById('chat-toggle');
+const chatLogEl = document.getElementById('chat-log');
+const chatFormEl = document.getElementById('chat-form');
+const chatInputEl = document.getElementById('chat-input');
+const goSimEl = document.getElementById('go-sim');
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const scene = new THREE.Scene();
+
+const FOV = 32;
+const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.1, 100);
+const CAM_DIST = 9;
+camera.position.set(0, 1.15, CAM_DIST);
+camera.lookAt(0, 0.15, 0);
+
+// ---------- lighting ----------
+const hemi = new THREE.HemisphereLight(0xffffff, 0x3a3226, 1.15);
+scene.add(hemi);
+
+const key = new THREE.DirectionalLight(0xfff3df, 2.1);
+key.position.set(4, 6, 5);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.near = 1;
+key.shadow.camera.far = 20;
+key.shadow.camera.left = -4;
+key.shadow.camera.right = 4;
+key.shadow.camera.top = 4;
+key.shadow.camera.bottom = -4;
+key.shadow.bias = -0.001;
+scene.add(key);
+
+const rim = new THREE.DirectionalLight(0x4fceac, 0.9);
+rim.position.set(-5, 3, -4);
+scene.add(rim);
+
+const MODEL_FACE_RIGHT = Math.PI / 2;
+const MODEL_FACE_SEATED = 0;
+
+// ---------- contact shadow (grounds the character on the page) ----------
+function makeShadowTexture() {
+  const size = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(20,20,15,0.38)');
+  g.addColorStop(0.7, 'rgba(20,20,15,0.14)');
+  g.addColorStop(1, 'rgba(20,20,15,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
+const shadowMat = new THREE.MeshBasicMaterial({
+  map: makeShadowTexture(),
+  transparent: true,
+  depthWrite: false,
+});
+const shadowDecal = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), shadowMat);
+shadowDecal.rotation.x = -Math.PI / 2;
+shadowDecal.position.y = -1.36;
+scene.add(shadowDecal);
+
+// ---------- KnowerBot ----------
+const rig = new THREE.Group();
+scene.add(rig);
+
+function visibleHalfWidthAt(z) {
+  const dist = camera.position.z - z;
+  const halfHeight = Math.tan(THREE.MathUtils.degToRad(FOV / 2)) * dist;
+  return halfHeight * camera.aspect;
+}
+
+const WALK_Z = 0;
+const wander = {
+  targetX: 0,
+  speed: 0.42,
+  pauseUntil: 0,
+};
+const botState = {
+  mode: 'loading',
+  baseY: 0,
+  nextSeatAt: 0,
+  seatStartedAt: 0,
+  sitStartedAt: 0,
+  jumpStartedAt: 0,
+  jumpDuration: 0.95,
+  startX: 0,
+  startY: 0,
+  targetX: 0,
+  targetY: 0,
+  targetZ: 0,
+  velocityX: 0,
+  jumpStartRotation: 0,
+  swimTargetX: 0,
+  chatStartedAt: 0,
+  targetScale: 1,
+};
+
+function pickWaypoint() {
+  const margin = 0.7;
+  const halfW = Math.min(visibleHalfWidthAt(WALK_Z) * margin, 3.4);
+  wander.targetX = (Math.random() * 2 - 1) * halfW;
+}
+pickWaypoint();
+
+let mixer = null;
+let activeAction = null;
+const actions = {};
+const clock = new THREE.Clock();
+window.__debug = { scene, camera, renderer, rig, botState, actions, get mixer() { return mixer; }, frameCount: 0, lastErr: null };
+let bubbleTimer = 0;
+let nextIdleBubbleAt = 0;
+let isLoggedIn = false;
+let pendingStartAfterLogin = false;
+let autoChatTimer = 0;
+let surveyCompleted = false;
+
+const textureLoader = new THREE.TextureLoader();
+function loadTexture(url, colorSpace) {
+  const texture = textureLoader.load(url);
+  texture.colorSpace = colorSpace || THREE.NoColorSpace;
+  texture.flipY = false;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
+if (hitboxEl) hitboxEl.addEventListener('click', enterChatMode);
+if (loginFormEl) {
+  loginFormEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startLoggedInDemo();
+  });
+}
+if (chatFormEl) {
+  chatFormEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!chatInputEl) return;
+    const value = chatInputEl.value;
+    chatInputEl.value = '';
+    handleChatSubmit(value);
+  });
+}
+if (goSimEl) goSimEl.addEventListener('click', showSimulationPage);
+
+const botMaps = {
+  map: loadTexture(TEXTURE_URLS.map, THREE.SRGBColorSpace),
+  normalMap: loadTexture(TEXTURE_URLS.normalMap),
+  metalnessMap: loadTexture(TEXTURE_URLS.metalnessMap),
+  roughnessMap: loadTexture(TEXTURE_URLS.roughnessMap),
+  emissiveMap: loadTexture(TEXTURE_URLS.emissiveMap, THREE.SRGBColorSpace),
+};
+
+function loadGltf(url) {
+  return new Promise((resolve, reject) => {
+    new GLTFLoader().load(url, resolve, undefined, reject);
+  });
+}
+
+function setAction(name, fade = 0.25) {
+  const next = actions[name] || actions.idle || actions.walking || actions.sitting || actions.jump || actions.swimming;
+  if (!next || next === activeAction) return;
+  next.reset().enabled = true;
+  next.setEffectiveWeight(1);
+  next.play();
+  if (activeAction) activeAction.crossFadeTo(next, fade, false);
+  activeAction = next;
+}
+
+function sanitizeClip(clip) {
+  const clean = clip.clone();
+  clean.tracks = clean.tracks.filter((track) => {
+    const name = track.name;
+    if (name.endsWith('.scale')) return false;
+    if (name.endsWith('.position')) return false;
+    if (/RootNode|KnowerBot|Sphere\.013/.test(name)) return false;
+    return true;
+  });
+  clean.resetDuration();
+  return clean;
+}
+
+function moveTowardX(targetX, maxSpeed, smooth, dt) {
+  const dx = targetX - rig.position.x;
+  const desired = THREE.MathUtils.clamp(dx * smooth, -maxSpeed, maxSpeed);
+  botState.velocityX += (desired - botState.velocityX) * Math.min(1, dt * 7);
+  rig.position.x += botState.velocityX * dt;
+  if (Math.abs(dx) < 0.035 && Math.abs(botState.velocityX) < 0.06) {
+    rig.position.x = targetX;
+    botState.velocityX = 0;
+  }
+  if (Math.abs(botState.velocityX) > 0.02) faceDirection(botState.velocityX);
+  return Math.abs(targetX - rig.position.x);
+}
+
+function screenToWorld(clientX, clientY, z = WALK_Z) {
+  const ndc = new THREE.Vector3(
+    clientX / window.innerWidth * 2 - 1,
+    -(clientY / window.innerHeight) * 2 + 1,
+    0.5
+  );
+  ndc.unproject(camera);
+  const dir = ndc.sub(camera.position).normalize();
+  const distance = (z - camera.position.z) / dir.z;
+  return camera.position.clone().addScaledVector(dir, distance);
+}
+
+function worldToScreen(pos) {
+  const p = pos.clone().project(camera);
+  return {
+    x: (p.x * 0.5 + 0.5) * window.innerWidth,
+    y: (-p.y * 0.5 + 0.5) * window.innerHeight,
+  };
+}
+
+function showBubble(text, duration = 3600) {
+  if (!bubbleEl) return;
+  bubbleEl.textContent = text;
+  bubbleEl.classList.add('active');
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(() => {
+    bubbleEl.classList.remove('active');
+  }, duration);
+}
+
+function updateBubblePosition() {
+  if (!bubbleEl || !rig.children.length) return;
+  const screen = worldToScreen(new THREE.Vector3(rig.position.x, rig.position.y + 0.62, rig.position.z));
+  const margin = 16;
+  const x = THREE.MathUtils.clamp(screen.x, margin, window.innerWidth - margin);
+  const y = THREE.MathUtils.clamp(screen.y, 72, window.innerHeight - margin);
+  bubbleEl.style.left = `${x}px`;
+  bubbleEl.style.top = `${y}px`;
+}
+
+function updateHitboxPosition() {
+  if (!hitboxEl || !rig.children.length) return;
+  const screen = worldToScreen(new THREE.Vector3(rig.position.x, rig.position.y + 0.35, rig.position.z));
+  hitboxEl.style.left = `${screen.x}px`;
+  hitboxEl.style.top = `${screen.y}px`;
+}
+
+function chatTarget() {
+  return {
+    x: 0,
+    y: botState.baseY + 1.35,
+    z: 1.65,
+    scale: 3.0,
+  };
+}
+
+function setChatOpen(open) {
+  if (!chatPanelEl) return;
+  chatPanelEl.classList.toggle('open', open);
+  if (open) {
+    requestAnimationFrame(() => chatInputEl && chatInputEl.focus());
+  }
+}
+
+function addChatMessage(role, text) {
+  if (!chatLogEl) return;
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${role}`;
+  msg.textContent = text;
+  chatLogEl.appendChild(msg);
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+
+function mockAiReply(message) {
+  if (/위험|리스크|손실|레버리지/.test(message)) {
+    return {
+      text: '좋아요. 지금은 레버리지 비중과 손절 기준을 먼저 확인하는 흐름으로 볼게요.',
+      bubble: '리스크부터 체크할게요.',
+      action: 'seat',
+    };
+  }
+  if (/수영|내려|움직/.test(message)) {
+    return {
+      text: '움직임 모드로 전환해볼게요. 내려간 뒤 화면 위를 다시 돌아다닐 수 있어요.',
+      bubble: '다시 움직여볼게요.',
+      action: 'swim',
+    };
+  }
+  return {
+    text: '좋아요. 지금 화면을 기준으로 같이 확인해볼게요.',
+    bubble: '제가 같이 볼게요.',
+    action: 'chat',
+  };
+}
+
+function enterChatMode() {
+  if (!isLoggedIn) return;
+  setSeatAffordance(false);
+  shadowDecal.visible = true;
+  setChatOpen(false);
+  const target = chatTarget();
+  botState.mode = 'approachChat';
+  botState.targetX = target.x;
+  botState.targetY = target.y;
+  botState.targetZ = target.z;
+  botState.targetScale = target.scale;
+  botState.chatStartedAt = performance.now() / 1000;
+  showBubble('불렀어요? 앞으로 갈게요.');
+  setAction('walking');
+}
+
+function startLoggedInDemo() {
+  if (isLoggedIn) return;
+  isLoggedIn = true;
+  surveyCompleted = false;
+  document.body.classList.remove('show-results');
+  if (chatInputEl) chatInputEl.disabled = false;
+  document.body.classList.add('logged-in');
+  setChatOpen(false);
+  showBubble('반가워요. 먼저 흐름을 살펴볼게요.', 3000);
+  if (botState.mode === 'loading' || !actions.swimming) {
+    pendingStartAfterLogin = true;
+    return;
+  }
+  startPostLoginSwim();
+}
+
+function startPostLoginSwim() {
+  pendingStartAfterLogin = false;
+  clearTimeout(autoChatTimer);
+  setSeatAffordance(false);
+  shadowDecal.visible = true;
+  botState.mode = 'swimming';
+  botState.targetScale = 1;
+  botState.targetZ = WALK_Z;
+  botState.swimTargetX = 2.6;
+  rig.position.x = -2.2;
+  rig.position.y = botState.baseY - 0.08;
+  rig.position.z = WALK_Z;
+  rig.scale.setScalar(1);
+  setAction('swimming', 0.15);
+  autoChatTimer = window.setTimeout(() => {
+    if (isLoggedIn) enterChatMode();
+  }, 3000);
+}
+
+function handleChatSubmit(message) {
+  const text = message.trim();
+  if (!text || surveyCompleted) return;
+  surveyCompleted = true;
+  addChatMessage('user', text);
+  const reply = mockAiReply(text);
+  window.setTimeout(() => {
+    addChatMessage('bot', reply.text);
+    showBubble(reply.bubble, 4200);
+    if (chatInputEl) chatInputEl.disabled = true;
+    window.setTimeout(showSurveyResults, 900);
+  }, 480);
+}
+
+function showSurveyResults() {
+  document.body.classList.add('show-results');
+  document.body.classList.remove('show-sim');
+  setChatOpen(false);
+  showBubble('결과를 정리했어요.', 3600);
+  setSeatAffordance(false);
+  shadowDecal.visible = true;
+  botState.mode = 'resultFlair';
+  botState.targetX = 0;
+  botState.targetY = botState.baseY + 0.95;
+  botState.targetScale = 1.85;
+  botState.targetZ = 1.25;
+  botState.swimTargetX = 0;
+  rig.position.x = 0;
+  rig.position.y = botState.targetY;
+  rig.position.z = WALK_Z;
+  rig.scale.setScalar(1);
+  setAction('flair', 0.2);
+}
+
+function showSimulationPage() {
+  document.body.classList.add('show-sim');
+  document.body.classList.remove('show-results');
+  setChatOpen(false);
+  setSeatAffordance(false);
+  if (bubbleEl) bubbleEl.classList.remove('active');
+  shadowDecal.visible = true;
+  const target = simTrainerTarget();
+  botState.mode = 'simTrainerSeat';
+  if (target) {
+    botState.targetX = target.x;
+    botState.targetY = target.y;
+    botState.targetZ = target.z;
+    botState.targetScale = target.scale;
+    rig.position.x = target.x;
+    rig.position.y = target.y;
+    rig.position.z = target.z;
+    rig.scale.setScalar(target.scale);
+  }
+  rig.rotation.y = MODEL_FACE_SEATED;
+  botState.velocityX = 0;
+  setAction('sitting', 0.2);
+}
+
+function simTrainerTarget() {
+  const el = document.querySelector('[data-sim-trainer-seat]');
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  const seatX = rect.left + rect.width * 0.5;
+  const seatY = rect.top + rect.height * 0.33;
+  const z = 1.45;
+  const world = screenToWorld(seatX, seatY, z);
+  return {
+    x: world.x,
+    y: world.y + 0.62,
+    z,
+    scale: 1.18,
+  };
+}
+
+function seatTarget() {
+  const el = document.querySelector('[data-knower-seat]');
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  const seatX = rect.left + rect.width * 0.5;
+  const seatY = rect.top + 3;
+  const world = screenToWorld(seatX, seatY, WALK_Z);
+  return { x: world.x, y: world.y + 1.0, screenX: seatX, screenY: seatY, el };
+}
+
+function setSeatAffordance(active) {
+  const el = document.querySelector('[data-knower-seat]');
+  if (el) el.classList.toggle('knower-seat-active', active);
+  if (seatShadowEl) seatShadowEl.classList.toggle('active', active);
+}
+
+function updateSeatShadow(target) {
+  if (!seatShadowEl || !target) return;
+  seatShadowEl.style.left = `${target.screenX}px`;
+  seatShadowEl.style.top = `${target.screenY + 10}px`;
+}
+
+function faceDirection(dir) {
+  if (!dir) return;
+  const targetFacing = dir > 0 ? MODEL_FACE_RIGHT : -MODEL_FACE_RIGHT;
+  let da = targetFacing - rig.rotation.y;
+  da = Math.atan2(Math.sin(da), Math.cos(da));
+  rig.rotation.y += da * 0.16;
+}
+
+function shortestAngleDelta(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function startSeatSequence() {
+  const target = seatTarget();
+  if (!target) return;
+  setChatOpen(false);
+  botState.targetScale = 1;
+  botState.targetZ = WALK_Z;
+  setSeatAffordance(true);
+  updateSeatShadow(target);
+  showBubble('저 위젯에서 위험 신호를 한번 볼게요.');
+  botState.mode = 'approachSeat';
+  botState.targetX = target.x;
+  botState.targetY = target.y;
+  botState.seatStartedAt = performance.now() / 1000;
+  setAction('walking');
+}
+
+function startJumpToSeat() {
+  const target = seatTarget();
+  if (target) {
+    botState.targetX = target.x;
+    botState.targetY = target.y;
+    updateSeatShadow(target);
+  }
+  botState.mode = 'jumpToSeat';
+  botState.jumpStartedAt = performance.now() / 1000;
+  botState.startX = rig.position.x;
+  botState.startY = rig.position.y;
+  botState.jumpStartRotation = rig.rotation.y;
+  showBubble('잠깐 올라가볼게요.');
+  setAction('jump', 0.12);
+}
+
+function sitOnWidget() {
+  botState.mode = 'sitting';
+  botState.sitStartedAt = performance.now() / 1000;
+  rig.position.x = botState.targetX;
+  rig.position.y = botState.targetY;
+  shadowDecal.visible = false;
+  setSeatAffordance(true);
+  showBubble('이 구간은 AI 코치가 개입하기 좋은 타이밍이에요.', 4200);
+  setAction('sitting', 0.22);
+}
+
+function startJumpDownToSwim() {
+  setSeatAffordance(false);
+  shadowDecal.visible = true;
+  botState.mode = 'jumpDown';
+  botState.jumpStartedAt = performance.now() / 1000;
+  botState.jumpDuration = 0.9;
+  botState.startX = rig.position.x;
+  botState.startY = rig.position.y;
+  botState.targetX = THREE.MathUtils.clamp(rig.position.x + 0.45, -2.8, 2.8);
+  botState.targetY = botState.baseY;
+  botState.jumpStartRotation = rig.rotation.y;
+  botState.swimTargetX = botState.targetX > 0 ? -2.6 : 2.6;
+  showBubble('다시 내려가서 흐름을 이어볼게요.');
+  setAction('jumpDown', 0.12);
+}
+
+function startSwimming() {
+  botState.mode = 'swimming';
+  setChatOpen(false);
+  botState.targetScale = 1;
+  botState.targetZ = WALK_Z;
+  rig.position.x = botState.targetX;
+  rig.position.y = botState.baseY - 0.08;
+  rig.position.z = WALK_Z;
+  rig.scale.setScalar(1);
+  faceDirection(botState.swimTargetX - rig.position.x);
+  showBubble('리스크는 먼저 연습해보는 게 좋아요.', 4200);
+  setAction('swimming', 0.2);
+}
+
+new GLTFLoader().load(
+  MODEL_URL,
+  (gltf) => {
+   try {
+    const model = gltf.scene;
+
+    model.updateMatrixWorld(true);
+    const initialBox = new THREE.Box3().setFromObject(model);
+    const initialSize = new THREE.Vector3();
+    initialBox.getSize(initialSize);
+    const targetHeight = 1.08;
+    const scale = targetHeight / Math.max(initialSize.y, 1);
+    model.scale.setScalar(scale);
+    model.updateMatrixWorld(true);
+
+    const worldBox = new THREE.Box3().setFromObject(model);
+    const worldCenter = new THREE.Vector3();
+    worldBox.getCenter(worldCenter);
+    model.position.x -= worldCenter.x;
+    model.position.z -= worldCenter.z;
+    model.position.y += -1.36 - worldBox.min.y;
+
+    model.rotation.y = 0;
+
+    model.traverse((n) => {
+      if (n.isMesh) {
+        n.castShadow = true;
+        if (n.material) {
+          n.material = new THREE.MeshStandardMaterial({
+            map: botMaps.map,
+            normalMap: botMaps.normalMap,
+            metalnessMap: botMaps.metalnessMap,
+            roughnessMap: botMaps.roughnessMap,
+            emissiveMap: botMaps.emissiveMap,
+            emissive: 0xffffff,
+            emissiveIntensity: 0.55,
+            metalness: 0.85,
+            roughness: 0.55,
+            envMapIntensity: 0.9,
+          });
+        }
+      }
+    });
+
+    rig.add(model);
+
+    mixer = new THREE.AnimationMixer(model);
+    if (gltf.animations && gltf.animations[0]) {
+      const swimClip = sanitizeClip(gltf.animations[0]);
+      swimClip.name = 'swimming';
+      const swimAction = mixer.clipAction(swimClip);
+      swimAction.timeScale = 0.78;
+      swimAction.enabled = true;
+      actions.swimming = swimAction;
+    }
+    const animationLoads = Object.entries(ANIMATION_URLS).map(([name, url]) => (
+      loadGltf(url).then((animGltf) => {
+        const clip = animGltf.animations && animGltf.animations[0];
+        if (clip) {
+          const cleanClip = sanitizeClip(clip);
+          cleanClip.name = name;
+          const action = mixer.clipAction(cleanClip);
+          if (name === 'walking') action.timeScale = 0.82;
+          if (name === 'flair') action.timeScale = 0.88;
+          if (name === 'jumpDown') {
+            action.timeScale = 1.05;
+            action.setLoop(THREE.LoopOnce, 1);
+            action.clampWhenFinished = true;
+          }
+          action.enabled = true;
+          if (name === 'sitting') action.clampWhenFinished = true;
+          actions[name] = action;
+        }
+      }).catch((e) => {
+        console.warn('Animation failed:', name, e);
+      })
+    ));
+
+    Promise.all(animationLoads).then(() => {
+      setAction('idle', 0);
+      if (isLoggedIn || pendingStartAfterLogin) {
+        startPostLoginSwim();
+      } else {
+        botState.mode = 'ready';
+      }
+    });
+   } catch (e) {
+     window.__debug.lastErr = String(e && e.stack || e);
+     console.error(e);
+   }
+  },
+  undefined,
+  (err) => {
+    window.__debug.lastErr = String(err && err.stack || err);
+    console.error(err);
+  }
+);
+
+// ---------- animation loop ----------
+function animate() {
+  requestAnimationFrame(animate);
+  try {
+  window.__debug.frameCount++;
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  if (mixer) mixer.update(dt);
+
+  if (rig.children.length) {
+    const now = performance.now() / 1000;
+    if (!isLoggedIn || botState.mode === 'ready') {
+      setAction('idle');
+      rig.position.y = botState.baseY;
+    } else if (botState.mode === 'wander') {
+      if (!nextIdleBubbleAt) nextIdleBubbleAt = now + 1.2;
+      const dx = wander.targetX - rig.position.x;
+      const dist = Math.abs(dx);
+      if (dist < 0.15 && now > wander.pauseUntil) {
+        pickWaypoint();
+        wander.pauseUntil = now + 0.8 + Math.random() * 1.6;
+        setAction('idle');
+      } else if (dist >= 0.15) {
+        moveTowardX(wander.targetX, wander.speed, 1.8, dt);
+        setAction('walking');
+      }
+      rig.position.y = botState.baseY + Math.sin(t * 2.2) * 0.03;
+      if (now > nextIdleBubbleAt) {
+        const lines = [
+          '오늘은 손실을 안전하게 연습해봐요.',
+          '레버리지 비중은 천천히 올리는 게 좋아요.',
+          '매매 전에 리스크부터 체크할게요.',
+        ];
+        showBubble(lines[Math.floor(Math.random() * lines.length)]);
+        nextIdleBubbleAt = now + 7 + Math.random() * 5;
+      }
+      if (now > botState.nextSeatAt) startSeatSequence();
+    } else if (botState.mode === 'approachChat') {
+      const target = chatTarget();
+      botState.targetX = target.x;
+      botState.targetY = target.y;
+      botState.targetZ = target.z;
+      botState.targetScale = target.scale;
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 2.8);
+      rig.position.y += (botState.targetY - rig.position.y) * Math.min(1, dt * 3.2);
+      rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 2.4);
+      rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 2.6)));
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3.5);
+      setAction('walking');
+      const closeEnough = Math.abs(botState.targetX - rig.position.x) < 0.08 && Math.abs(botState.targetZ - rig.position.z) < 0.08;
+      if (!chatPanelEl.classList.contains('open') && closeEnough) {
+        setChatOpen(true);
+      }
+      if (!closeEnough) {
+        // Keep approaching.
+      } else {
+        botState.velocityX = 0;
+        botState.mode = 'chatIdle';
+        showBubble('무엇을 같이 볼까요?', 4200);
+        addChatMessage('bot', '무엇을 같이 볼까요?');
+        if (chatInputEl) chatInputEl.focus();
+        setAction('idle');
+      }
+    } else if (botState.mode === 'chatIdle') {
+      const target = chatTarget();
+      botState.targetX = target.x;
+      botState.targetY = target.y;
+      botState.targetZ = target.z;
+      botState.targetScale = target.scale;
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 3.5);
+      rig.position.y += (botState.targetY + Math.sin(t * 2.0) * 0.02 - rig.position.y) * Math.min(1, dt * 3.5);
+      rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 3.5);
+      rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 3.5)));
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3.5);
+      setAction('idle');
+    } else if (botState.mode === 'approachSeat') {
+      const target = seatTarget();
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+        updateSeatShadow(target);
+      }
+      const dx = botState.targetX - rig.position.x;
+      const dir = Math.sign(dx);
+      if (Math.abs(dx) > 0.16) {
+        moveTowardX(botState.targetX, 0.55, 2.2, dt);
+        setAction('walking');
+      } else {
+        botState.velocityX = 0;
+        startJumpToSeat();
+      }
+      rig.position.y = botState.baseY;
+    } else if (botState.mode === 'jumpToSeat') {
+      const p = Math.min(1, (now - botState.jumpStartedAt) / botState.jumpDuration);
+      const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      rig.position.x = THREE.MathUtils.lerp(botState.startX, botState.targetX, eased);
+      rig.position.y = THREE.MathUtils.lerp(botState.startY, botState.targetY, eased) + Math.sin(p * Math.PI) * 0.55;
+      const turnP = THREE.MathUtils.smoothstep(p, 0.35, 0.92);
+      rig.rotation.y = botState.jumpStartRotation + shortestAngleDelta(botState.jumpStartRotation, MODEL_FACE_SEATED) * turnP;
+      if (p >= 1) sitOnWidget();
+    } else if (botState.mode === 'sitting') {
+      rig.rotation.y += (MODEL_FACE_SEATED - rig.rotation.y) * Math.min(1, dt * 6);
+      const target = seatTarget();
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+        updateSeatShadow(target);
+        rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 5);
+        rig.position.y += (botState.targetY - rig.position.y) * Math.min(1, dt * 5);
+      }
+      setAction('sitting');
+      if (now - botState.sitStartedAt > 2.2) startJumpDownToSwim();
+    } else if (botState.mode === 'jumpDown') {
+      const p = Math.min(1, (now - botState.jumpStartedAt) / botState.jumpDuration);
+      const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      rig.position.x = THREE.MathUtils.lerp(botState.startX, botState.targetX, eased);
+      rig.position.y = THREE.MathUtils.lerp(botState.startY, botState.targetY, eased) + Math.sin(p * Math.PI) * 0.32;
+      const turnP = THREE.MathUtils.smoothstep(p, 0.15, 0.75);
+      rig.rotation.y = botState.jumpStartRotation + shortestAngleDelta(botState.jumpStartRotation, MODEL_FACE_RIGHT) * turnP;
+      if (p >= 1) startSwimming();
+    } else if (botState.mode === 'swimming') {
+      const halfW = Math.min(visibleHalfWidthAt(WALK_Z) * 0.7, 3.2);
+      if (Math.abs(botState.swimTargetX - rig.position.x) < 0.18) {
+        botState.swimTargetX = botState.swimTargetX > 0 ? -halfW : halfW;
+      }
+      moveTowardX(botState.swimTargetX, 0.38, 1.5, dt);
+      rig.position.y = botState.baseY - 0.08 + Math.sin(t * 3.4) * 0.045;
+      setAction('swimming');
+    } else if (botState.mode === 'resultFlair') {
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 4);
+      rig.position.y += (botState.targetY + Math.sin(t * 2.3) * 0.025 - rig.position.y) * Math.min(1, dt * 4);
+      rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 4);
+      rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 4)));
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 4);
+      setAction('flair');
+    } else if (botState.mode === 'simTrainerSeat') {
+      const target = simTrainerTarget();
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+        botState.targetZ = target.z;
+        botState.targetScale = target.scale;
+      }
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 5);
+      rig.position.y += (botState.targetY - rig.position.y) * Math.min(1, dt * 5);
+      rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 5);
+      rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 5)));
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 6);
+      setAction('sitting');
+    }
+
+    if (botState.mode !== 'approachChat' && botState.mode !== 'chatIdle' && botState.mode !== 'resultFlair' && botState.mode !== 'simTrainerSeat') {
+      rig.position.z += ((botState.targetZ || WALK_Z) - rig.position.z) * Math.min(1, dt * 3);
+      rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale || 1, Math.min(1, dt * 3)));
+    }
+
+    shadowDecal.position.x = rig.position.x;
+    shadowDecal.position.z = rig.position.z;
+    updateBubblePosition();
+    updateHitboxPosition();
+  }
+
+  renderer.render(scene, camera);
+  } catch (e) {
+    window.__debug.lastErr = String(e && e.stack || e);
+    throw e;
+  }
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+renderer.setSize(window.innerWidth, window.innerHeight);
+})();
+</script>
+</body>
+</html>

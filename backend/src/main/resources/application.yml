@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: trading-gym-backend
+  datasource:
+    # 로컬 Postgres(brew, trust auth) 기준 기본값. 다른 환경에서는 DB_USERNAME/DB_PASSWORD로 덮어쓸 것.
+    url: jdbc:postgresql://localhost:5432/trading_gym_dev
+    username: ${DB_USERNAME:ksjhbrc}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 마이그레이션 도구(Flyway 등) 없이 엔티티 기준으로 테이블을 맞추는 하커톤용 설정.
+      # db/schema.sql의 users 테이블 정의와 형태를 맞춰뒀지만, 실제 소유자는 이 설정임.
+      ddl-auto: update
+
+server:
+  # 8080/8081/8090은 이 맥북에서 다른 프로젝트가 이미 쓰고 있어서 8079로 고정.
+  port: 8079
+
+jwt:
+  # 개발용 기본값. 실제 배포 시 반드시 환경변수(JWT_SECRET)로 덮어쓸 것 — HS256이라 최소 32바이트 필요.
+  secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-before-any-real-deployment-please}
+  access-token-validity-seconds: 900       # 15분
+  refresh-token-validity-seconds: 1209600  # 14일
