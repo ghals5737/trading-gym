@@ -19,6 +19,23 @@ create table users (
   created_at timestamptz not null default now()
 );
 
+-- 실제 KRX 시세(2020-02~04, Yahoo Finance 조회 — 실데이터, 종목 5개).
+-- 매매 체결가는 이 테이블에서 서버가 조회해서 결정 — 클라이언트가 가격을 보내지 않음.
+create table stock_daily_prices (
+  id uuid primary key default gen_random_uuid(),
+  stock_code text not null,
+  stock_name text not null,
+  trade_date date not null,
+  open_price numeric not null,
+  high_price numeric not null,
+  low_price numeric not null,
+  close_price numeric not null,
+  volume bigint not null default 0,
+  unique (stock_code, trade_date)
+);
+
+create index stock_daily_prices_code_date_idx on stock_daily_prices (stock_code, trade_date);
+
 create type education_category as enum (
   '기초 개념',
   '리스크 관리',

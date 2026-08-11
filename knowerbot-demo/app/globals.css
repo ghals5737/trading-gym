@@ -68,8 +68,7 @@ body:not(.logged-in) #seat-shadow,
 body:not(.logged-in) #bot-bubble,
 body:not(.logged-in) #bot-hitbox,
 body:not(.logged-in) #bot-close,
-body:not(.logged-in) #chat-panel,
-body:not(.logged-in) #hud {
+body:not(.logged-in) #chat-panel {
   visibility: hidden;
 }
 /* login modal: hidden until explicitly opened via a "로그인" button, and
@@ -515,25 +514,6 @@ h1 {
   z-index: 5;
   display: block;
   pointer-events: none;
-}
-#hud {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 6;
-  padding: 10px 16px;
-  background: color-mix(in srgb, var(--white) 70%, transparent);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  backdrop-filter: blur(8px);
-  font-size: 11px;
-  color: var(--muted);
-  pointer-events: none;
-  max-width: 220px;
-  line-height: 1.5;
-}
-#hud b {
-  color: var(--ink);
 }
 #seat-shadow {
   position: fixed;

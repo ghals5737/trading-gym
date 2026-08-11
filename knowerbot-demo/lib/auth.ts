@@ -5,9 +5,13 @@ const ACCESS_TOKEN_KEY = 'kg_access_token';
 const REFRESH_TOKEN_KEY = 'kg_refresh_token';
 const LOGGED_IN_KEY = 'kg_logged_in';
 
-function apiBaseUrl(): string {
+export function apiBaseUrl(): string {
   // Keep in sync with API_BASE in public/knowerbot-runtime.js.
   return `${window.location.protocol}//${window.location.hostname}:8079`;
+}
+
+export function getAccessToken(): string | null {
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
 export async function logout(): Promise<void> {

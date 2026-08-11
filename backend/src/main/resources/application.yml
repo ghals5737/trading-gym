@@ -22,3 +22,22 @@ jwt:
   secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-before-any-real-deployment-please}
   access-token-validity-seconds: 900       # 15분
   refresh-token-validity-seconds: 1209600  # 14일
+
+ai:
+  # stub(기본값, 키 불필요) | anthropic | openai | gemini | codex-cli — 어댑터 선택.
+  # anthropic/openai/gemini는 아래 각 provider의 api-key가 채워지면 바로 전환됨.
+  # codex-cli는 API 키 대신 로컬에 설치된 `codex` CLI(ChatGPT 로그인 기반, API 과금과 무관)를
+  # 서브프로세스로 호출함 — PATH에 codex가 있고 `codex login`이 돼있어야 함.
+  provider: ${AI_PROVIDER:stub}
+
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:}
+  model: ${ANTHROPIC_MODEL:claude-sonnet-4-5}
+
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+
+gemini:
+  api-key: ${GEMINI_API_KEY:}
+  model: ${GEMINI_MODEL:gemini-2.0-flash}

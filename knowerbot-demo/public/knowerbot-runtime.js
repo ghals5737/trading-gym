@@ -35,6 +35,12 @@ const API_BASE = `${window.location.protocol}//${window.location.hostname}:8079`
 const ACCESS_TOKEN_KEY = 'kg_access_token';
 const REFRESH_TOKEN_KEY = 'kg_refresh_token';
 
+function authHeaders() {
+  let token = null;
+  try { token = window.localStorage.getItem(ACCESS_TOKEN_KEY); } catch (e) {}
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 const canvas = document.getElementById('stage');
 const loginFormEl = document.getElementById('login-form');
 const loginIdEl = document.getElementById('login-id');
@@ -186,9 +192,29 @@ if (isLoggedIn) {
   document.body.classList.add('logged-in');
   if (chatInputEl) chatInputEl.disabled = false;
 }
+// 로그인 폼을 거치지 않고(이미 로그인된 채로) 페이지를 새로 열었을 때도 온보딩을
+// 안 했으면 보내야 하므로, startLoggedInDemo()의 리다이렉트와 별개로 여기서도 한 번 확인함.
+// /onboarding 자체에서는 확인 안 함 — 이미 그 페이지에 있는데 또 리다이렉트하면
+// 진행 중인 채팅 설문이 새로고침으로 끊길 수 있음.
+if (isLoggedIn && window.location.pathname !== '/onboarding') {
+  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+    .then((res) => {
+      // replace(그냥 href 아님) — 강제 리다이렉트라 "뒤로가기"로 이 페이지로 되돌아오면
+      // 어차피 또 리다이렉트될 뿐이라 히스토리에 남길 이유가 없음.
+      if (res.status === 204) window.location.replace('/onboarding');
+    })
+    .catch(() => {});
+}
 let pendingStartAfterLogin = false;
 let autoChatTimer = 0;
-let surveyCompleted = false;
+let onboardingChecked = false;
+// answers는 더 이상 여기서 안 들고 있음 — 매 턴 서버에 바로 저장되고(POST /answer),
+// 채점은 submit 시점에 서버가 저장된 대화 전체를 보고 한 번에 함.
+const surveyState = {
+  active: false,
+  questions: [],
+  index: 0,
+};
 
 const textureLoader = new THREE.TextureLoader();
 function loadTexture(url, colorSpace) {
@@ -450,15 +476,25 @@ function exitChatMode() {
   setAction('walking', 0.15);
 }
 
-function startLoggedInDemo() {
+async function startLoggedInDemo() {
   if (isLoggedIn) return;
   isLoggedIn = true;
   try {
     window.localStorage.setItem('kg_logged_in', '1');
   } catch (e) {}
-  surveyCompleted = false;
   if (chatInputEl) chatInputEl.disabled = false;
   document.body.classList.add('logged-in');
+
+  // 로그인 직후 이 계정이 아직 온보딩(투자성향 진단)을 안 했으면 그 페이지로 바로 보냄 —
+  // 실패(네트워크 오류 등)하면 그냥 평소 흐름으로 진행(로그인 자체를 막지 않음).
+  try {
+    const res = await fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() });
+    if (res.status === 204) {
+      window.location.replace('/onboarding');
+      return;
+    }
+  } catch (e) {}
+
   setChatOpen(false);
   showBubble('반가워요. 먼저 흐름을 살펴볼게요.', 3000);
   if (botState.mode === 'loading' || !actions.swimming) {
@@ -503,16 +539,141 @@ function startPostLoginSwim() {
 
 function handleChatSubmit(message) {
   const text = message.trim();
-  if (!text || surveyCompleted) return;
-  surveyCompleted = true;
+  if (!text) return;
+  if (surveyState.active) {
+    submitOnboardingAnswer(text);
+    return;
+  }
   addChatMessage('user', text);
   const reply = mockAiReply(text);
   window.setTimeout(() => {
     addChatMessage('bot', reply.text);
     showBubble(reply.bubble, 4200);
-    if (chatInputEl) chatInputEl.disabled = true;
-    window.setTimeout(showSurveyResults, 900);
   }, 480);
+}
+
+// 자유 텍스트 답변을 그대로 서버에 저장만 함(채점 없음) — 매 턴 "~로 이해했어요" 같은
+// 확인 멘트로 안 끊기고 바로 다음 질문으로 넘어가서 실제 대화처럼 자연스럽게 흘러감.
+// 채점+설명은 6문항이 다 모이면 finishOnboardingSurvey가 대화 전체를 한 번에 분석함.
+function submitOnboardingAnswer(text) {
+  addChatMessage('user', text);
+  const question = surveyState.questions[surveyState.index];
+  if (chatInputEl) chatInputEl.disabled = true;
+  fetch(`${API_BASE}/api/onboarding/answer`, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+    body: JSON.stringify({ questionId: question.id, rawText: text }),
+  })
+    .then((res) => res.json())
+    .then(() => {
+      surveyState.index += 1;
+      if (chatInputEl) chatInputEl.disabled = false;
+      window.setTimeout(askNextOnboardingQuestion, 550);
+    })
+    .catch(() => {
+      addChatMessage('bot', '답변을 저장하지 못했어요. 다시 한 번 말해주실래요?');
+      if (chatInputEl) chatInputEl.disabled = false;
+    });
+}
+
+// 챗 패널을 열 때마다 한 번씩 확인: 아직 투자성향 진단이 없으면 그 자리에서
+// 온보딩 설문을 채팅으로 진행하고, 이미 있으면 평범한 인사만 함.
+function maybeStartOnboardingSurvey() {
+  if (onboardingChecked) {
+    if (!surveyState.active) greetInChat();
+    return;
+  }
+  onboardingChecked = true;
+  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+    .then((res) => (res.status === 204 ? null : res.json()))
+    .then((profile) => {
+      if (profile) {
+        greetInChat();
+        return;
+      }
+      startOnboardingSurvey();
+    })
+    .catch(() => greetInChat());
+}
+
+function greetInChat() {
+  showBubble('무엇을 같이 볼까요?', 4200);
+  addChatMessage('bot', '무엇을 같이 볼까요?');
+  if (chatInputEl) chatInputEl.focus();
+}
+
+// 진행 중이던 답(POST /answer 때마다 서버에 즉시 저장됨)이 있으면 그 뒤부터 이어감 —
+// 문항 순서는 고정이라 "아직 답 안 한 첫 문항"을 서버가 준 progress로 계산하면 됨.
+function startOnboardingSurvey() {
+  if (chatInputEl) chatInputEl.disabled = true;
+  fetch(`${API_BASE}/api/onboarding/progress`, { headers: authHeaders() })
+    .then((res) => res.json())
+    .then((progress) => {
+      const answeredIds = new Set(progress.map((p) => p.questionId));
+      addChatMessage(
+        'bot',
+        progress.length > 0
+          ? `저번에 이어서 할게요. ${progress.length}개는 이미 답했어요.`
+          : '몇 가지만 물어볼게요. 투자 성향을 파악하는 데만 써요. 편하게 말하듯 답해주세요.',
+      );
+      return fetch(`${API_BASE}/api/onboarding/questions`, { headers: authHeaders() })
+        .then((res) => res.json())
+        .then((questions) => {
+          surveyState.active = true;
+          surveyState.questions = questions;
+          const firstUnanswered = questions.findIndex((q) => !answeredIds.has(q.id));
+          surveyState.index = firstUnanswered === -1 ? questions.length : firstUnanswered;
+          window.setTimeout(askNextOnboardingQuestion, 380);
+        });
+    })
+    .catch(() => {
+      addChatMessage('bot', '지금은 설문을 불러올 수 없어요. 나중에 다시 시도해주세요.');
+      if (chatInputEl) chatInputEl.disabled = false;
+    });
+}
+
+function askNextOnboardingQuestion() {
+  const question = surveyState.questions[surveyState.index];
+  if (!question) {
+    finishOnboardingSurvey();
+    return;
+  }
+  addChatMessage('bot', question.text);
+  if (chatInputEl) {
+    chatInputEl.disabled = false;
+    chatInputEl.focus();
+  }
+}
+
+// 대화(원문 6개)는 이미 서버에 다 저장돼있어서 body 없이 호출 — 서버가 그 전체를
+// AI에 한 번에 넘겨서 채점+설명을 같이 받아옴. 그래서 다른 호출보다 오래 걸릴 수 있음.
+function finishOnboardingSurvey() {
+  addChatMessage('bot', '분석 중이에요... (조금 걸릴 수 있어요)');
+  fetch(`${API_BASE}/api/onboarding/submit`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+    .then((res) => res.json())
+    .then((result) => {
+      // 답변 중 질문이랑 무관해 보이는 게 있으면 profile 대신 questionsToRetry가 옴 — 그
+      // 문항들은 서버에서 이미 지워졌으니 startOnboardingSurvey를 다시 불러서(기존
+      // 이어하기 로직 그대로) 자연스럽게 그 문항부터 다시 물어보게 함.
+      if (result.questionsToRetry && result.questionsToRetry.length > 0) {
+        surveyState.active = false;
+        addChatMessage('bot', '몇 가지 답변이 질문이랑 안 맞는 것 같아요. 그 부분만 다시 여쭤볼게요.');
+        window.setTimeout(startOnboardingSurvey, 600);
+        return;
+      }
+      surveyState.active = false;
+      addChatMessage('bot', result.profile.explanationText);
+      showBubble('결과를 정리했어요.', 3600);
+      window.setTimeout(showSurveyResults, 1400);
+    })
+    .catch(() => {
+      surveyState.active = false;
+      addChatMessage('bot', '결과 저장에 실패했어요. 잠시 후 다시 시도해주세요.');
+      if (chatInputEl) chatInputEl.disabled = false;
+    });
 }
 
 function showSurveyResults() {
@@ -534,9 +695,10 @@ function showSurveyResults() {
   // let the celebration pose play for a beat, then hand off to the real
   // 사전조사 결과 route (the old build toggled a hidden section on this same
   // page instead — that page no longer exists now that each screen is its
-  // own route).
+  // own route). replace(그냥 href 아님) — 완료 직전의 "질문 중" 채팅 화면을 히스토리에
+  // 안 남겨서, 결과 화면에서 뒤로가기를 눌러도 끝난 설문 상태로 안 돌아가게 함.
   window.setTimeout(() => {
-    window.location.href = '/onboarding/result';
+    window.location.replace('/onboarding/result');
   }, 1400);
 }
 
@@ -919,10 +1081,8 @@ function animate() {
       } else {
         botState.velocityX = 0;
         botState.mode = 'chatIdle';
-        showBubble('무엇을 같이 볼까요?', 4200);
-        addChatMessage('bot', '무엇을 같이 볼까요?');
-        if (chatInputEl) chatInputEl.focus();
         setAction('idle');
+        maybeStartOnboardingSurvey();
       }
     } else if (botState.mode === 'chatIdle') {
       const target = chatTarget();

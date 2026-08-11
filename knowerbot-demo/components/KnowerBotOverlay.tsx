@@ -1,7 +1,7 @@
 'use client';
 
 // Global, route-independent UI: the login gate and the 3D KnowerBot overlay
-// (canvas + chat panel + hud). knowerbot-runtime.js queries these elements by
+// (canvas + chat panel). knowerbot-runtime.js queries these elements by
 // id/attribute once on load, so they must exist in the DOM on every route.
 export default function KnowerBotOverlay() {
   return (
@@ -44,11 +44,6 @@ export default function KnowerBotOverlay() {
           <button type="submit">전송</button>
         </form>
       </section>
-      <div id="hud">
-        <b>KnowerBot</b>
-        <br />
-        3D 캐릭터가 2D 페이지 위를 자유롭게 떠다녀요.
-      </div>
     </>
   );
 }
