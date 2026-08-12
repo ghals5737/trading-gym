@@ -41,6 +41,73 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// access token은 15분마다 만료됨(백엔드 JwtProperties 기준) — 온보딩 채팅처럼 오래 걸리는
+// 세션 도중 만료돼도 끊기지 않게, 401을 맞으면 refresh token으로 한 번 자동 갱신하고 재시도함.
+// lib/auth.ts의 authFetch와 같은 목적(별도 vanilla-JS 번들이라 로직은 중복 구현).
+let refreshInFlight = null;
+function refreshAccessToken() {
+  let refreshToken = null;
+  try { refreshToken = window.localStorage.getItem(REFRESH_TOKEN_KEY); } catch (e) {}
+  if (!refreshToken) return Promise.resolve(false);
+  return fetch(`${API_BASE}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!data) return false;
+      try {
+        window.localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
+        window.localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+      } catch (e) {}
+      return true;
+    })
+    .catch(() => false);
+}
+
+function currentAccessToken() {
+  try { return window.localStorage.getItem(ACCESS_TOKEN_KEY); } catch (e) { return null; }
+}
+
+// fetch를 그대로 대체 — headers에 authHeaders()를 미리 합쳐 넣고, 401이면 refresh 후 한 번만 재시도.
+// refresh까지 실패하면(리프레시 토큰도 만료) 로그인 화면으로 돌려보냄.
+//
+// 이 vanilla-JS 쪽과 lib/auth.ts(React 번들) 쪽에 authFetch가 각각 따로 있음 — 같은 JS
+// 실행 컨텍스트가 아니라 refreshInFlight를 공유 못 함. 페이지 로드 시 두 쪽이 거의 동시에
+// 401을 맞으면 둘 다 같은(1회용) refresh token으로 갱신을 시도해서 하나는 성공하고 하나는
+// 이미 소모된 토큰이라 실패하는 게 실제로 발생함(라이브로 재현·확인함) — 그 실패한 쪽이
+// 그대로 로그아웃되지 않도록, 시도 전후로 access token이 이미 바뀌어 있으면(다른 쪽이 이미
+// 갱신 성공) 새 토큰으로 재시도함.
+function authFetch(url, options) {
+  const opts = options || {};
+  const withAuth = () =>
+    fetch(url, Object.assign({}, opts, { headers: Object.assign({}, opts.headers, authHeaders()) }));
+  const tokenAtStart = currentAccessToken();
+  return withAuth().then((res) => {
+    if (res.status !== 401) return res;
+    if (currentAccessToken() !== tokenAtStart) {
+      // 다른 곳(React 쪽 authFetch 등)에서 그 사이 이미 갱신함 — 새 토큰으로 재시도.
+      return withAuth();
+    }
+    if (!refreshInFlight) {
+      refreshInFlight = refreshAccessToken().finally(() => { refreshInFlight = null; });
+    }
+    return refreshInFlight.then((refreshed) => {
+      if (refreshed || currentAccessToken() !== tokenAtStart) {
+        return withAuth();
+      }
+      try {
+        window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+        window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+        window.localStorage.removeItem('kg_logged_in');
+      } catch (e) {}
+      window.location.href = '/';
+      return Promise.reject(new Error('세션이 만료됐어요'));
+    });
+  });
+}
+
 const canvas = document.getElementById('stage');
 const loginFormEl = document.getElementById('login-form');
 const loginIdEl = document.getElementById('login-id');
@@ -197,7 +264,7 @@ if (isLoggedIn) {
 // /onboarding 자체에서는 확인 안 함 — 이미 그 페이지에 있는데 또 리다이렉트하면
 // 진행 중인 채팅 설문이 새로고침으로 끊길 수 있음.
 if (isLoggedIn && window.location.pathname !== '/onboarding') {
-  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+  authFetch(`${API_BASE}/api/onboarding/profile`, {})
     .then((res) => {
       // replace(그냥 href 아님) — 강제 리다이렉트라 "뒤로가기"로 이 페이지로 되돌아오면
       // 어차피 또 리다이렉트될 뿐이라 히스토리에 남길 이유가 없음.
@@ -208,6 +275,12 @@ if (isLoggedIn && window.location.pathname !== '/onboarding') {
 let pendingStartAfterLogin = false;
 let autoChatTimer = 0;
 let onboardingChecked = false;
+// /onboarding?retake=1로 들어오면 프로필이 있어도 처음부터 다시 물어봄 — 마이페이지의
+// "다시 진단받기" 버튼이 이 쿼리로 진입시킴. 각 답은 upsert라 새로 답하면 예전 답을 덮어씀.
+let retakeRequested = false;
+try {
+  retakeRequested = new URLSearchParams(window.location.search).get('retake') === '1';
+} catch (e) {}
 // answers는 더 이상 여기서 안 들고 있음 — 매 턴 서버에 바로 저장되고(POST /answer),
 // 채점은 submit 시점에 서버가 저장된 대화 전체를 보고 한 번에 함.
 const surveyState = {
@@ -426,28 +499,6 @@ function addChatMessage(role, text) {
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
 }
 
-function mockAiReply(message) {
-  if (/위험|리스크|손실|레버리지/.test(message)) {
-    return {
-      text: '좋아요. 지금은 레버리지 비중과 손절 기준을 먼저 확인하는 흐름으로 볼게요.',
-      bubble: '리스크부터 체크할게요.',
-      action: 'seat',
-    };
-  }
-  if (/수영|내려|움직/.test(message)) {
-    return {
-      text: '움직임 모드로 전환해볼게요. 내려간 뒤 화면 위를 다시 돌아다닐 수 있어요.',
-      bubble: '다시 움직여볼게요.',
-      action: 'swim',
-    };
-  }
-  return {
-    text: '좋아요. 지금 화면을 기준으로 같이 확인해볼게요.',
-    bubble: '제가 같이 볼게요.',
-    action: 'chat',
-  };
-}
-
 function enterChatMode() {
   if (!isLoggedIn) return;
   setSeatAffordance(false);
@@ -488,7 +539,7 @@ async function startLoggedInDemo() {
   // 로그인 직후 이 계정이 아직 온보딩(투자성향 진단)을 안 했으면 그 페이지로 바로 보냄 —
   // 실패(네트워크 오류 등)하면 그냥 평소 흐름으로 진행(로그인 자체를 막지 않음).
   try {
-    const res = await fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() });
+    const res = await authFetch(`${API_BASE}/api/onboarding/profile`, {});
     if (res.status === 204) {
       window.location.replace('/onboarding');
       return;
@@ -540,34 +591,78 @@ function startPostLoginSwim() {
 function handleChatSubmit(message) {
   const text = message.trim();
   if (!text) return;
+  if (pendingAskResolve) {
+    addChatMessage('user', text);
+    const resolve = pendingAskResolve;
+    pendingAskResolve = null;
+    if (chatInputEl) chatInputEl.disabled = false;
+    resolve(text);
+    return;
+  }
   if (surveyState.active) {
     submitOnboardingAnswer(text);
     return;
   }
   addChatMessage('user', text);
-  const reply = mockAiReply(text);
-  window.setTimeout(() => {
-    addChatMessage('bot', reply.text);
-    showBubble(reply.bubble, 4200);
-  }, 480);
+  if (chatInputEl) chatInputEl.disabled = true;
+  // 유저 메시지는 서버가 저장하고, 최근 대화 맥락과 함께 AI에 넘겨 답변을 받아 그것도
+  // 저장한 뒤 답변만 돌려줌 — chat_messages 테이블에 실제로 쌓임(mockAiReply 대체).
+  authFetch(`${API_BASE}/api/chat/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+    .then((res) => res.json())
+    .then((reply) => {
+      addChatMessage('bot', reply.content);
+      showBubble(reply.content.length > 24 ? `${reply.content.slice(0, 22)}…` : reply.content, 4200);
+    })
+    .catch(() => {
+      addChatMessage('bot', '지금은 답하지 못했어요. 잠시 후 다시 말해주세요.');
+    })
+    .finally(() => {
+      if (chatInputEl) chatInputEl.disabled = false;
+    });
 }
 
-// 자유 텍스트 답변을 그대로 서버에 저장만 함(채점 없음) — 매 턴 "~로 이해했어요" 같은
-// 확인 멘트로 안 끊기고 바로 다음 질문으로 넘어가서 실제 대화처럼 자연스럽게 흘러감.
+// 모의투자에서 매수/매도/관망 이유를 물을 때 씀 — KnowerBot이 다가와서(enterChatMode) 채팅으로
+// 직접 물어보고, 사용자가 채팅으로 답하면 그 텍스트로 프라미스가 풀림. simulation-client.tsx의
+// React 쪽이 이 함수를 호출해서 await로 답을 받아감(별도 vanilla-JS 번들이라 window에 노출).
+let pendingAskQuestion = null;
+let pendingAskResolve = null;
+window.knowerbotAskReason = function (question) {
+  return new Promise((resolve) => {
+    pendingAskQuestion = question;
+    pendingAskResolve = resolve;
+    enterChatMode();
+  });
+};
+
+// 자유 텍스트 답변을 서버에 보냄 — 서버가 그 문항이랑 무관해 보이는 답인지 즉석에서
+// 체크해서(가벼운 AI 호출) accepted=false면 저장을 안 하고 feedback만 옴. 그럴 땐
+// index를 그대로 두고 같은 문항을 다시 물어봄. accepted=true여야 "~로 이해했어요" 같은
+// 확인 멘트 없이 바로 다음 질문으로 넘어가서 실제 대화처럼 자연스럽게 흘러감.
 // 채점+설명은 6문항이 다 모이면 finishOnboardingSurvey가 대화 전체를 한 번에 분석함.
 function submitOnboardingAnswer(text) {
   addChatMessage('user', text);
   const question = surveyState.questions[surveyState.index];
   if (chatInputEl) chatInputEl.disabled = true;
-  fetch(`${API_BASE}/api/onboarding/answer`, {
+  authFetch(`${API_BASE}/api/onboarding/answer`, {
     method: 'POST',
-    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ questionId: question.id, rawText: text }),
   })
     .then((res) => res.json())
-    .then(() => {
-      surveyState.index += 1;
+    .then((result) => {
       if (chatInputEl) chatInputEl.disabled = false;
+      if (!result.accepted) {
+        window.setTimeout(() => {
+          addChatMessage('bot', result.feedback || '음... 질문이랑 조금 다른 답변 같아요. 다시 한 번 말씀해주실래요?');
+          if (chatInputEl) chatInputEl.focus();
+        }, 480);
+        return;
+      }
+      surveyState.index += 1;
       window.setTimeout(askNextOnboardingQuestion, 550);
     })
     .catch(() => {
@@ -578,13 +673,20 @@ function submitOnboardingAnswer(text) {
 
 // 챗 패널을 열 때마다 한 번씩 확인: 아직 투자성향 진단이 없으면 그 자리에서
 // 온보딩 설문을 채팅으로 진행하고, 이미 있으면 평범한 인사만 함.
+// ?retake=1로 들어왔으면 프로필 존재 여부와 무관하게 무조건 처음부터 다시 물어봄.
 function maybeStartOnboardingSurvey() {
+  if (retakeRequested) {
+    retakeRequested = false;
+    onboardingChecked = true;
+    startOnboardingSurvey(true);
+    return;
+  }
   if (onboardingChecked) {
     if (!surveyState.active) greetInChat();
     return;
   }
   onboardingChecked = true;
-  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+  authFetch(`${API_BASE}/api/onboarding/profile`, {})
     .then((res) => (res.status === 204 ? null : res.json()))
     .then((profile) => {
       if (profile) {
@@ -604,19 +706,25 @@ function greetInChat() {
 
 // 진행 중이던 답(POST /answer 때마다 서버에 즉시 저장됨)이 있으면 그 뒤부터 이어감 —
 // 문항 순서는 고정이라 "아직 답 안 한 첫 문항"을 서버가 준 progress로 계산하면 됨.
-function startOnboardingSurvey() {
+// retake=true면 기존 답 여부를 무시하고 0번 문항부터 전부 다시 물어봄 — 답은 문항별
+// upsert라 새로 답하면 예전 답을 그대로 덮어쓰고, 서버에 별도 초기화 요청은 필요 없음.
+function startOnboardingSurvey(retake) {
   if (chatInputEl) chatInputEl.disabled = true;
-  fetch(`${API_BASE}/api/onboarding/progress`, { headers: authHeaders() })
-    .then((res) => res.json())
+  const progressPromise = retake
+    ? Promise.resolve([])
+    : authFetch(`${API_BASE}/api/onboarding/progress`, {}).then((res) => res.json());
+  progressPromise
     .then((progress) => {
       const answeredIds = new Set(progress.map((p) => p.questionId));
       addChatMessage(
         'bot',
-        progress.length > 0
+        retake
+          ? '사전 조사를 다시 해볼게요. 편하게 말하듯 답해주세요.'
+          : progress.length > 0
           ? `저번에 이어서 할게요. ${progress.length}개는 이미 답했어요.`
           : '몇 가지만 물어볼게요. 투자 성향을 파악하는 데만 써요. 편하게 말하듯 답해주세요.',
       );
-      return fetch(`${API_BASE}/api/onboarding/questions`, { headers: authHeaders() })
+      return authFetch(`${API_BASE}/api/onboarding/questions`, {})
         .then((res) => res.json())
         .then((questions) => {
           surveyState.active = true;
@@ -649,9 +757,8 @@ function askNextOnboardingQuestion() {
 // AI에 한 번에 넘겨서 채점+설명을 같이 받아옴. 그래서 다른 호출보다 오래 걸릴 수 있음.
 function finishOnboardingSurvey() {
   addChatMessage('bot', '분석 중이에요... (조금 걸릴 수 있어요)');
-  fetch(`${API_BASE}/api/onboarding/submit`, {
+  authFetch(`${API_BASE}/api/onboarding/submit`, {
     method: 'POST',
-    headers: authHeaders(),
   })
     .then((res) => res.json())
     .then((result) => {
@@ -1082,7 +1189,18 @@ function animate() {
         botState.velocityX = 0;
         botState.mode = 'chatIdle';
         setAction('idle');
-        maybeStartOnboardingSurvey();
+        if (pendingAskQuestion) {
+          const q = pendingAskQuestion;
+          pendingAskQuestion = null;
+          addChatMessage('bot', q);
+          showBubble('답해주세요', 2400);
+          if (chatInputEl) {
+            chatInputEl.disabled = false;
+            chatInputEl.focus();
+          }
+        } else {
+          maybeStartOnboardingSurvey();
+        }
       }
     } else if (botState.mode === 'chatIdle') {
       const target = chatTarget();

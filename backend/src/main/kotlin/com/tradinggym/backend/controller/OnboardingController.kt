@@ -3,6 +3,7 @@ package com.tradinggym.backend.controller
 import com.tradinggym.backend.dto.InvestorProfileResponse
 import com.tradinggym.backend.dto.OnboardingQuestionResponse
 import com.tradinggym.backend.dto.SaveAnswerRequest
+import com.tradinggym.backend.dto.SaveAnswerResult
 import com.tradinggym.backend.dto.SavedAnswerResponse
 import com.tradinggym.backend.dto.SubmitOnboardingResponse
 import com.tradinggym.backend.service.OnboardingService
@@ -22,7 +23,7 @@ class OnboardingController(private val onboardingService: OnboardingService) {
 	fun getQuestions(): List<OnboardingQuestionResponse> = onboardingService.getQuestions()
 
 	@PostMapping("/answer")
-	fun saveAnswer(authentication: Authentication, @RequestBody request: SaveAnswerRequest): SavedAnswerResponse =
+	fun saveAnswer(authentication: Authentication, @RequestBody request: SaveAnswerRequest): SaveAnswerResult =
 		onboardingService.saveAnswer(authentication.name, request)
 
 	@GetMapping("/progress")

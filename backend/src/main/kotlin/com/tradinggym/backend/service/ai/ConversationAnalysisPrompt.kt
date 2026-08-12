@@ -78,4 +78,46 @@ object ConversationAnalysisPrompt {
 			explanationText = "지금은 AI 설명을 만들지 못했어요. 답변을 바탕으로 채점은 정상적으로 반영됐어요.",
 		)
 	}
+
+	fun buildCheckPrompt(turn: ConversationTurnInput): String {
+		return """
+			너는 '트레이딩 짐'이라는 모의투자 교육 서비스의 AI 코치야. 지금 사용자와 투자성향
+			진단 채팅 중이고, 방금 아래 질문을 던졌더니 이렇게 답이 왔어.
+
+			질문: ${turn.question.text}
+			사용자 답변: "${turn.rawAnswerText}"
+
+			이 답변이 질문에 대한 성실한 시도인지 판단해줘. 짧거나 다소 애매해도 질문 주제와
+			관련이 있으면 OK로 판단해(예: "잘 모르겠어요", "그냥 그래요"도 OK). 질문이랑 아예
+			무관하거나(예: 날씨 얘기, 다른 화제), 욕설·장난, 의미 없는 문자 반복인 경우에만
+			NEEDS_RETRY로 판단해.
+
+			NEEDS_RETRY면 사용자에게 다시 물어볼 짧고 친근한 한국어 안내 문장(1문장, 존댓말)도
+			같이 줘.
+
+			아래 형식 그대로만 출력해(다른 말 절대 덧붙이지 마):
+			RESULT: <OK 또는 NEEDS_RETRY>
+			FEEDBACK: <NEEDS_RETRY일 때만 안내 문장, OK면 빈 줄>
+		""".trimIndent()
+	}
+
+	// "RESULT: OK/NEEDS_RETRY" + "FEEDBACK: ..." 두 줄을 관대하게 찾음. RESULT 줄을
+	// 아예 못 찾으면 파싱 실패로 보고 null(호출부가 fallbackCheckResult로 대체).
+	fun parseCheck(rawResponse: String): AnswerCheckResult? {
+		val resultMatch = Regex("RESULT\\s*[:=]?\\s*(OK|NEEDS_RETRY)").find(rawResponse) ?: return null
+		if (resultMatch.groupValues[1] == "OK") return AnswerCheckResult(clear = true)
+		val feedback = Regex("FEEDBACK\\s*[:=]?\\s*(.+)").find(rawResponse)?.groupValues?.get(1)?.trim()
+		return AnswerCheckResult(clear = false, feedback = feedback?.ifBlank { null } ?: DEFAULT_RETRY_FEEDBACK)
+	}
+
+	// LLM 호출이 실패하거나 응답 파싱이 안 될 때 — 완전히 의미 없는 답(공백 하나, 같은
+	// 문자 반복 등)만 걸러내고 나머지는 통과시킴. 이 단계에서 잘못 막으면 API 장애가
+	// 그대로 사용자를 진단 채팅에 가둬버리니, 애매하면 통과가 기본값이어야 함.
+	fun fallbackCheckResult(turn: ConversationTurnInput): AnswerCheckResult {
+		val trimmed = turn.rawAnswerText.trim()
+		val degenerate = trimmed.length < 2 || trimmed.toSet().size == 1
+		return if (degenerate) AnswerCheckResult(clear = false, feedback = DEFAULT_RETRY_FEEDBACK) else AnswerCheckResult(clear = true)
+	}
+
+	private const val DEFAULT_RETRY_FEEDBACK = "음... 질문이랑 조금 다른 답변 같아요. 다시 한 번 말씀해주실래요?"
 }

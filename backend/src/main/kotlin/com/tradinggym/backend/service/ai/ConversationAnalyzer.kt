@@ -19,9 +19,21 @@ data class ConversationAnalysisResult(
 	val explanationText: String,
 )
 
+// 답변 하나를 저장하기 직전에 즉석에서 판단하는 결과 — clear=false면 저장을 안 하고
+// feedback을 그대로 채팅에 보여준 뒤 같은 문항을 다시 물어봄(saveAnswer 참고).
+data class AnswerCheckResult(
+	val clear: Boolean,
+	val feedback: String? = null,
+)
+
 // 어댑터 인터페이스 — ai.provider 설정값에 따라 구현체 하나만 활성화됨(@ConditionalOnProperty).
 // 매 턴마다 부르던 AnswerScoreExtractor/ProfileExplanationGenerator 두 인터페이스를 이걸로
 // 통합함 — 대화가 끝난 뒤 딱 한 번만 호출되고, 채점과 설명을 같이 만들어냄.
 interface ConversationAnalyzer {
 	fun analyze(turns: List<ConversationTurnInput>): ConversationAnalysisResult
+
+	// 답변 하나가 저장되기 직전에 부르는 가벼운 즉석 체크 — 그 문항이랑 아예 무관해
+	// 보이면 즉시 피드백을 주고 재답변을 받기 위함(analyze의 unclearQuestionIds는
+	// 6문항이 다 끝난 뒤에야 도는 최종 안전망이라 이거랑 역할이 다름).
+	fun checkAnswer(turn: ConversationTurnInput): AnswerCheckResult
 }

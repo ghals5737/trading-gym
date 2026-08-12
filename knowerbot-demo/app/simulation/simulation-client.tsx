@@ -10,6 +10,7 @@ import {
   createSession,
   getQuotes,
   getStockHistory,
+  getStockNews,
   recordTrade,
   listTrades,
   advanceTurn,
@@ -18,11 +19,35 @@ import {
   type QuoteResponse,
   type TradeResponse,
   type TradeOrderType,
+  type TurnUnit,
   type PricePoint,
+  type StockNewsResponse,
 } from '../../lib/simulation-api';
+import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
+import { warningFor } from '../../lib/onboarding-copy';
+
+const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일주일', MONTH: '한달' };
+
+// KnowerBot이 채팅으로 직접 물어봄(public/knowerbot-runtime.js가 window에 노출) — 그 벡터가
+// 아직 안 떠 있으면(로딩 지연 등) null을 돌려줘서 호출부가 매매를 취소하게 함.
+declare global {
+  interface Window {
+    knowerbotAskReason?: (question: string) => Promise<string>;
+  }
+}
+async function askReason(question: string): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof window.knowerbotAskReason !== 'function') {
+    return null;
+  }
+  const answer = await window.knowerbotAskReason(question);
+  return answer.trim() ? answer.trim() : null;
+}
 
 const STARTING_CASH = 10_000_000;
 const MAINTENANCE_RATIO = 1.4; // 담보 유지비율 140% — 백엔드 SimulationService와 동일 기준
+// 시작일~종료일 사이 최소 거래일수 — 백엔드 SimulationService.MIN_START_DATE_RANGE_DAYS(=MAX_TURNS)와 동일.
+// 여긴 종료일 드롭다운 후보를 미리 걸러내는 용도일 뿐, 실제 검증은 서버가 다시 함.
+const MIN_RANGE_TRADING_DAYS = 20;
 
 interface Holding {
   stockCode: string;
@@ -35,18 +60,21 @@ interface Holding {
 function computeHoldings(trades: TradeResponse[]): Holding[] {
   const byStock = new Map<string, { stockName: string; quantity: number; totalCost: number }>();
   for (const t of trades) {
-    if (!t.filled || t.price == null) continue;
-    const entry = byStock.get(t.stockCode) ?? { stockName: t.stockName, quantity: 0, totalCost: 0 };
+    if (!t.filled || t.price == null || t.stockCode == null || t.quantity == null || t.stockName == null) continue;
+    const stockCode = t.stockCode;
+    const quantity = t.quantity;
+    const price = t.price;
+    const entry = byStock.get(stockCode) ?? { stockName: t.stockName, quantity: 0, totalCost: 0 };
     if (t.side === 'BUY') {
-      entry.quantity += t.quantity;
-      entry.totalCost += t.quantity * t.price;
+      entry.quantity += quantity;
+      entry.totalCost += quantity * price;
     } else {
       const avgPrice = entry.quantity > 0 ? entry.totalCost / entry.quantity : 0;
-      entry.quantity = Math.max(0, entry.quantity - t.quantity);
+      entry.quantity = Math.max(0, entry.quantity - quantity);
       entry.totalCost = avgPrice * entry.quantity;
     }
     entry.stockName = t.stockName;
-    byStock.set(t.stockCode, entry);
+    byStock.set(stockCode, entry);
   }
   return [...byStock.entries()]
     .filter(([, v]) => v.quantity > 0)
@@ -85,29 +113,35 @@ export default function SimulationClient() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [startDateChoice, setStartDateChoice] = useState('');
+  const [endDateChoice, setEndDateChoice] = useState('');
+  const [turnUnitChoice, setTurnUnitChoice] = useState<TurnUnit>('DAY');
   const [needsStartDate, setNeedsStartDate] = useState(false);
   const [starting, setStarting] = useState(false);
   const [quotes, setQuotes] = useState<QuoteResponse[]>([]);
   const [trades, setTrades] = useState<TradeResponse[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
   const [historyPoints, setHistoryPoints] = useState<PricePoint[]>([]);
-  const [turnIndex, setTurnIndex] = useState(1);
+  const [stockNews, setStockNews] = useState<StockNewsResponse | null>(null);
 
   const [quantity, setQuantity] = useState(10);
   const [credit, setCredit] = useState(false);
   const [orderType, setOrderType] = useState<TradeOrderType>('MARKET');
   const [limitPriceInput, setLimitPriceInput] = useState('');
+  const [pendingReason, setPendingReason] = useState('');
+  const [asking, setAsking] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const [showRisk, setShowRisk] = useState(false);
   const [pendingRiskRatio, setPendingRiskRatio] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
   const [liquidationEvent, setLiquidationEvent] = useState<TradeResponse[] | null>(null);
-  const [completedSummary, setCompletedSummary] = useState<{ startingCash: number; finalValue: number; returnPct: number } | null>(
-    null,
-  );
+  const [completedSummary, setCompletedSummary] = useState<
+    { startingCash: number; finalValue: number; returnPct: number; reason?: string } | null
+  >(null);
   const [ending, setEnding] = useState(false);
+  const [profile, setProfile] = useState<InvestorProfileResponse | null>(null);
 
   // 진행 중인 세션 있으면 이어가고, 없으면 시작 날짜를 고르게 함(자동 시작 안 함)
   useEffect(() => {
@@ -127,14 +161,32 @@ export default function SimulationClient() {
         setLoading(false);
       }
     })();
+    // 온보딩 진단 결과 — 신용거래 경고 강도를 성향별로 차등하는 데 씀. 미진단이면 null(차등 없음).
+    getMyInvestorProfile().then(setProfile).catch(() => setProfile(null));
   }, []);
 
+  // 시작일부터 최소 MIN_RANGE_TRADING_DAYS 거래일 이상 떨어진 날짜만 종료일 후보로 줌 —
+  // availableDates가 이미 실제 거래일만 오름차순으로 담고 있어서 인덱스 계산만으로 충분함.
+  const startIndex = availableDates.indexOf(startDateChoice);
+  const validEndDates = startIndex >= 0 ? availableDates.slice(startIndex + MIN_RANGE_TRADING_DAYS - 1) : [];
+
+  // 시작일이 바뀌면(또는 처음 로드되면) 종료일 후보도 다시 계산 — 기존 선택이 여전히
+  // 유효하면 유지하고, 아니면 가장 긴 구간(마지막 후보)으로 기본값을 다시 잡음.
+  useEffect(() => {
+    setEndDateChoice((prev) => (validEndDates.includes(prev) ? prev : validEndDates[validEndDates.length - 1] ?? ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDateChoice, availableDates]);
+
+  // 리스크는 크게 감수하고 싶은데 지식은 부족하거나, 정보를 SNS·리딩방에 의존하는 조합이면
+  // 반대매매를 가장 겪기 쉬운 유형 — 온보딩 결과 화면(warningFor)과 같은 기준을 여기서도 재사용.
+  const riskWarningText = profile ? warningFor(profile.profileType, profile.knowledgeLevel, profile.infoHabitLevel) : null;
+
   async function handleStartSession() {
-    if (!startDateChoice) return;
+    if (!startDateChoice || !endDateChoice) return;
     setStarting(true);
     setError(null);
     try {
-      const s = await createSession(STARTING_CASH, startDateChoice);
+      const s = await createSession(STARTING_CASH, startDateChoice, endDateChoice);
       setSession(s);
       setNeedsStartDate(false);
     } catch (e) {
@@ -159,6 +211,16 @@ export default function SimulationClient() {
   useEffect(() => {
     if (!session || !activeCode) return;
     getStockHistory(session.id, activeCode).then((h) => setHistoryPoints(h.points));
+  }, [session, activeCode]);
+
+  // 선택 종목 또는 턴이 바뀌면 그 종목의 실제 뉴스(고정 데이터)도 다시 불러옴 —
+  // 뉴스가 있는 날짜는 드물어서 없을 때가 훨씬 많음(null이면 뉴스 카드 자체를 숨김).
+  useEffect(() => {
+    if (!session || !activeCode) {
+      setStockNews(null);
+      return;
+    }
+    getStockNews(session.id, activeCode).then(setStockNews);
   }, [session, activeCode]);
 
   const active = quotes.find((q) => q.stockCode === activeCode);
@@ -188,7 +250,7 @@ export default function SimulationClient() {
     return t;
   }
 
-  async function executeTrade(side: 'BUY' | 'SELL') {
+  async function executeTrade(side: 'BUY' | 'SELL', reason: string) {
     if (!session || !active) return;
     if (orderType === 'LIMIT' && !(limitPrice > 0)) {
       setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
@@ -205,10 +267,12 @@ export default function SimulationClient() {
         quantity,
         isCredit: credit,
         leverageRatio: credit ? 1.5 : undefined,
+        reasonText: reason,
       });
       const [s] = await Promise.all([getActiveSession(), refreshAndDetectLiquidation(session.id, prevTradeIds)]);
       if (s) setSession(s);
       setShowRisk(false);
+      setPendingReason('');
       if (trade.filled) {
         setActionResult({
           type: 'success',
@@ -226,34 +290,89 @@ export default function SimulationClient() {
     }
   }
 
-  // 신용매수 시 예상 담보비율을 미리 계산해서 140% 밑으로 떨어질 것 같으면 경고 모달을 먼저 보여줌.
-  // (실제 체결가/반대매매 여부는 서버가 최종 판단 — 이건 사용자에게 보여주는 사전 추정치일 뿐.)
-  function attemptBuy() {
-    if (credit && session && active) {
+  // 매수 버튼을 누르면 먼저 KnowerBot이 채팅으로 다가와서 이유를 물어봄 — 답을 받은 뒤에야
+  // 신용매수 위험도 체크(필요하면 경고 모달)로 넘어가고, 최종적으로 매매가 기록됨.
+  // 온보딩에서 "위험한 조합"으로 진단된 사용자는 경고 버퍼를 더 크게 잡아 더 일찍 경고함.
+  async function attemptBuy() {
+    if (!session || !active || asking) return;
+    if (orderType === 'LIMIT' && !(limitPrice > 0)) {
+      setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
+      return;
+    }
+    setAsking(true);
+    const reason = await askReason(`${active.stockName} ${quantity}주를 ${credit ? '신용으로 ' : ''}매수하려는 이유가 뭐예요?`);
+    setAsking(false);
+    if (!reason) {
+      setActionResult({ type: 'warning', message: 'KnowerBot한테 이유를 말해줘야 매매가 진행돼요.' });
+      return;
+    }
+    setPendingReason(reason);
+    if (credit) {
       const positionValue = active.openPrice * quantity;
       const leverageRatio = 1.5;
       const marginRequired = positionValue / leverageRatio;
       const newBorrowed = borrowedAmount + (positionValue - marginRequired);
       const newEquity = session.currentCash - marginRequired + holdingsValue + positionValue;
       const expectedRatio = newBorrowed > 0 ? (newEquity / newBorrowed) * 100 : Infinity;
-      if (expectedRatio < MAINTENANCE_RATIO * 100 + 20) {
+      const warningBufferPct = riskWarningText ? 40 : 20;
+      if (expectedRatio < MAINTENANCE_RATIO * 100 + warningBufferPct) {
         setPendingRiskRatio(expectedRatio);
         setShowRisk(true);
         return;
       }
     }
-    executeTrade('BUY');
+    executeTrade('BUY', reason);
   }
 
+  async function attemptSell() {
+    if (!session || !active || asking) return;
+    if (orderType === 'LIMIT' && !(limitPrice > 0)) {
+      setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
+      return;
+    }
+    setAsking(true);
+    const reason = await askReason(`${active.stockName} ${quantity}주를 매도하려는 이유가 뭐예요?`);
+    setAsking(false);
+    if (!reason) {
+      setActionResult({ type: 'warning', message: 'KnowerBot한테 이유를 말해줘야 매매가 진행돼요.' });
+      return;
+    }
+    executeTrade('SELL', reason);
+  }
+
+  // 이번 턴에 매매가 하나도 없었으면 KnowerBot이 관망 이유를 먼저 물어봄 — 있으면 그냥 다음 턴으로.
   async function handleAdvanceTurn() {
-    if (!session) return;
+    if (!session || asking) return;
+    const tradedThisTurn = trades.some((t) => t.turnNumber === session.turnCount);
+    let holdReason: string | undefined;
+    if (!tradedThisTurn) {
+      setAsking(true);
+      const reason = await askReason('이번 턴엔 매매가 없었네요. 왜 관망하기로 했어요?');
+      setAsking(false);
+      if (!reason) {
+        setActionResult({ type: 'warning', message: 'KnowerBot한테 관망 이유를 말해줘야 다음 턴으로 넘어가요.' });
+        return;
+      }
+      holdReason = reason;
+    }
     setActionResult(null);
     const prevTradeIds = new Set(trades.map((t) => t.id));
     try {
-      const s = await advanceTurn(session.id);
+      const s = await advanceTurn(session.id, turnUnitChoice, holdReason);
       await refreshAndDetectLiquidation(session.id, prevTradeIds);
+      // 넘기려는 기간이 시세 데이터 범위를 벗어나면 백엔드가 에러 대신 세션을 바로
+      // COMPLETED로 종료해서 돌려줌 — 이때는 다음 턴으로 안 넘어가고 종료 화면을 보여줌.
+      if (s.status === 'COMPLETED') {
+        setCompletedSummary({
+          startingCash: s.startingCash,
+          finalValue: portfolioValue,
+          returnPct: ((portfolioValue - s.startingCash) / s.startingCash) * 100,
+          reason: '더 이상 진행할 수 있는 시세 데이터가 없어서 스파링이 자동으로 종료됐어요.',
+        });
+        setSession(null);
+        return;
+      }
       setSession(s);
-      setTurnIndex((i) => i + 1);
     } catch (e) {
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '더 이상 진행할 거래일이 없어요' });
     }
@@ -288,7 +407,6 @@ export default function SimulationClient() {
     setQuotes([]);
     setActiveCode(null);
     setHistoryPoints([]);
-    setTurnIndex(1);
   }
 
   if (loading) {
@@ -302,7 +420,7 @@ export default function SimulationClient() {
         <div className="result-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링이 끝났어요</h2>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>이번 세션 결과예요.</p>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{completedSummary.reason ?? '이번 세션 결과예요.'}</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
             <strong style={{ fontSize: 30 }}>{Math.round(completedSummary.finalValue).toLocaleString()}원</strong>
@@ -334,9 +452,9 @@ export default function SimulationClient() {
       <div style={{ maxWidth: 420, margin: '80px auto', padding: '0 24px' }}>
         <div className="result-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링 시작 날짜를 골라주세요</h2>
+            <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링 기간을 골라주세요</h2>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
-              실제 2020년 시세 데이터 중 하루를 골라 그날부터 모의투자를 시작해요.
+              실제 시세 데이터 중 시작일과 종료일을 골라 그 기간 동안 모의투자를 진행해요. (최소 {MIN_RANGE_TRADING_DAYS}거래일)
             </p>
           </div>
           {error && (
@@ -344,19 +462,37 @@ export default function SimulationClient() {
               {error}
             </div>
           )}
-          <select
-            value={startDateChoice}
-            onChange={(e) => setStartDateChoice(e.target.value)}
-            style={{ height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
-          >
-            {availableDates.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleStartSession} disabled={starting || !startDateChoice} className="btn btn-primary btn-block">
-            {starting ? '시작하는 중...' : '이 날짜로 시작하기'}
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>시작일</label>
+            <select
+              value={startDateChoice}
+              onChange={(e) => setStartDateChoice(e.target.value)}
+              style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
+            >
+              {availableDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>종료일</label>
+            <select
+              value={endDateChoice}
+              onChange={(e) => setEndDateChoice(e.target.value)}
+              disabled={validEndDates.length === 0}
+              style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
+            >
+              {validEndDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button onClick={handleStartSession} disabled={starting || !startDateChoice || !endDateChoice} className="btn btn-primary btn-block">
+            {starting ? '시작하는 중...' : '이 기간으로 시작하기'}
           </button>
         </div>
       </div>
@@ -399,7 +535,7 @@ export default function SimulationClient() {
                   {changePct.toFixed(1)}%
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {turnIndex}턴째 · {session.currentTurnDate} 시가
+                  {session.turnCount}/{session.maxTurns}턴 · {session.currentTurnDate} 시가 · {session.targetEndDate}에 종료 예정
                 </span>
               </div>
               <PriceChart
@@ -410,34 +546,39 @@ export default function SimulationClient() {
               />
             </div>
 
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                alignItems: 'center',
-                padding: '0 12px',
-                height: 51,
-                background: 'var(--white)',
-                border: '1px solid var(--line)',
-                borderRadius: 12,
-              }}
-            >
-              <span
+            {stockNews && (
+              <button
+                onClick={() => setShowNews(true)}
                 style={{
-                  background: 'var(--green-chip)',
-                  color: 'var(--green)',
-                  fontSize: 11,
-                  fontWeight: 800,
-                  borderRadius: 999,
-                  padding: '3px 9px',
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  background: 'var(--white)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
                 }}
               >
-                뉴스
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--soft)' }}>
-                감염병 확산 공포… 글로벌 증시 동반 급락 시작
-              </span>
-            </div>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    background: 'var(--green-chip)',
+                    color: 'var(--green)',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    borderRadius: 999,
+                    padding: '3px 9px',
+                  }}
+                >
+                  뉴스
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--soft)', flex: 1 }}>{stockNews.headline}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>자세히 ›</span>
+              </button>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               {[
@@ -613,12 +754,16 @@ export default function SimulationClient() {
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                 예상 금액 {estimate.toLocaleString()}원 ({orderType === 'MARKET' ? '시장가 · 시가 기준' : '지정가 기준(체결 안 될 수 있음)'}) · 신용거래 시 1.5배 표기
               </p>
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
+                매수·매도 버튼을 누르면 KnowerBot이 다가와서 이유를 물어봐요 — 채팅으로 답해주세요.
+              </p>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={attemptBuy} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
+                <button onClick={attemptBuy} disabled={asking} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
                   매수
                 </button>
                 <button
-                  onClick={() => executeTrade('SELL')}
+                  onClick={attemptSell}
+                  disabled={asking}
                   className="btn btn-sm"
                   style={{ flex: 1, background: 'var(--red-chip)', color: 'var(--red)', border: 0 }}
                 >
@@ -638,12 +783,32 @@ export default function SimulationClient() {
                 >
                   신용거래 (1.5배)
                 </button>
-                <button onClick={handleAdvanceTurn} className="btn btn-sm btn-secondary" style={{ flex: 1 }}>
-                  관망 → 다음 턴
+                <select
+                  value={turnUnitChoice}
+                  onChange={(e) => setTurnUnitChoice(e.target.value as TurnUnit)}
+                  disabled={asking || session.turnCount >= session.maxTurns}
+                  style={{ height: 34, borderRadius: 8, border: '1px solid var(--line)', padding: '0 8px', fontSize: 12 }}
+                  title="다음 턴까지 흐를 기간"
+                >
+                  {(Object.keys(TURN_UNIT_LABELS) as TurnUnit[]).map((unit) => (
+                    <option key={unit} value={unit}>
+                      {TURN_UNIT_LABELS[unit]}씩
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAdvanceTurn}
+                  disabled={asking || session.turnCount >= session.maxTurns}
+                  className="btn btn-sm btn-secondary"
+                  style={{ flex: 1 }}
+                >
+                  다음 턴
                 </button>
               </div>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
-                하루 한 종목당 매매는 한 번만 — 이미 시도한 종목은 다음 턴에 다시 시도할 수 있어요.
+                {session.turnCount >= session.maxTurns
+                  ? '최대 턴에 도달했어요 — 시뮬레이션을 종료하고 리포트를 확인해보세요.'
+                  : '이번 턴에 매매 없이 다음 턴으로 넘어가면 KnowerBot이 관망 이유를 물어봐요.'}
               </p>
               <button
                 onClick={handleCompleteSession}
@@ -699,12 +864,14 @@ export default function SimulationClient() {
           onClose={() => setShowDetail(false)}
         />
       )}
+      {showNews && stockNews && <NewsDetailModal news={stockNews} onClose={() => setShowNews(false)} />}
       {showRisk && (
         <RiskInterventionModal
           quantity={`${quantity}주`}
           expectedRatioPct={pendingRiskRatio}
+          diagnosisWarning={riskWarningText}
           onCancel={() => setShowRisk(false)}
-          onProceed={() => executeTrade('BUY')}
+          onProceed={() => executeTrade('BUY', pendingReason)}
         />
       )}
       {liquidationEvent && (
@@ -770,6 +937,59 @@ function ActionResultModal({
           {palette.icon}
         </span>
         <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, fontWeight: 700 }}>{result.message}</p>
+        <button onClick={onClose} className="btn btn-primary btn-block">
+          확인
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewsDetailModal({ news, onClose }: { news: StockNewsResponse; onClose: () => void }) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 40,
+        background: 'rgba(13, 18, 10, 0.55)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 'min(420px, 100%)',
+          background: 'var(--white)',
+          borderRadius: 20,
+          padding: 28,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+          boxShadow: '0 24px 60px rgba(13, 18, 10, 0.3)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span
+          style={{
+            alignSelf: 'flex-start',
+            background: 'var(--green-chip)',
+            color: 'var(--green)',
+            fontSize: 11,
+            fontWeight: 800,
+            borderRadius: 999,
+            padding: '3px 9px',
+          }}
+        >
+          뉴스
+        </span>
+        <h3 style={{ margin: 0, fontSize: 17, lineHeight: 1.4 }}>{news.headline}</h3>
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: 'var(--soft)' }}>{news.summary}</p>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+          {news.tradeDate} · {news.source}
+        </span>
         <button onClick={onClose} className="btn btn-primary btn-block">
           확인
         </button>
@@ -945,11 +1165,13 @@ function StockDetailModal({
 function RiskInterventionModal({
   quantity,
   expectedRatioPct,
+  diagnosisWarning,
   onCancel,
   onProceed,
 }: {
   quantity: string;
   expectedRatioPct: number | null;
+  diagnosisWarning: string | null;
   onCancel: () => void;
   onProceed: () => void;
 }) {
@@ -1016,6 +1238,14 @@ function RiskInterventionModal({
             </div>
           ))}
         </div>
+        {diagnosisWarning && (
+          <div style={{ background: 'var(--red-chip)', borderRadius: 10, padding: '12px 14px' }}>
+            <small style={{ display: 'block', fontSize: 11, color: 'var(--red)', fontWeight: 800, marginBottom: 4 }}>
+              사전 조사 진단 기준
+            </small>
+            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', lineHeight: 1.5, fontWeight: 600 }}>{diagnosisWarning}</p>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onCancel} className="btn btn-primary" style={{ flex: 1 }}>
             다시 생각해볼게요
@@ -1032,7 +1262,7 @@ function RiskInterventionModal({
 // 담보비율이 140% 밑으로 떨어져서 서버가 보유 종목을 강제로 전부 판 경우 뜨는 모달 —
 // 매수/매도 실패 알림과는 결이 달라서 별도 컴포넌트로 분리(더 무겁고 경고성 강한 톤).
 function ForcedLiquidationModal({ trades, onClose }: { trades: TradeResponse[]; onClose: () => void }) {
-  const totalProceeds = trades.reduce((sum, t) => sum + (t.price ?? 0) * t.quantity, 0);
+  const totalProceeds = trades.reduce((sum, t) => sum + (t.price ?? 0) * (t.quantity ?? 0), 0);
   return (
     <div
       style={{

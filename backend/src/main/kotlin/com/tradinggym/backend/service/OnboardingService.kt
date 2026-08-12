@@ -4,6 +4,7 @@ import com.tradinggym.backend.dto.InvestorProfileResponse
 import com.tradinggym.backend.dto.OnboardingOptionResponse
 import com.tradinggym.backend.dto.OnboardingQuestionResponse
 import com.tradinggym.backend.dto.SaveAnswerRequest
+import com.tradinggym.backend.dto.SaveAnswerResult
 import com.tradinggym.backend.dto.SavedAnswerResponse
 import com.tradinggym.backend.dto.SubmitOnboardingResponse
 import com.tradinggym.backend.entity.InvestorInfoHabitLevel
@@ -41,10 +42,12 @@ class OnboardingService(
 		}
 	}
 
-	// 문항 하나의 자유 텍스트 답을 그대로 저장(upsert) — 채점은 여기서 안 함. AI 호출 없이
-	// DB 쓰기만 하니 빠르고, 채팅이 매 턴 끊기지 않고 자연스럽게 이어짐.
+	// 문항 하나의 자유 텍스트 답을 저장(upsert)하기 전에 AI가 가볍게 즉석 체크함 — 그
+	// 문항이랑 아예 무관해 보이면 저장을 안 하고 accepted=false + feedback을 돌려줘서
+	// 프론트가 같은 문항을 바로 다시 물어보게 함. 통과하면 채점은 여기서 안 함(6문항이
+	// 다 모이면 submitOnboarding이 대화 전체를 한 번에 분석).
 	@Transactional
-	fun saveAnswer(username: String, request: SaveAnswerRequest): SavedAnswerResponse {
+	fun saveAnswer(username: String, request: SaveAnswerRequest): SaveAnswerResult {
 		if (request.rawText.isBlank()) {
 			throw ResponseStatusException(HttpStatus.BAD_REQUEST, "답변을 입력해주세요")
 		}
@@ -56,13 +59,18 @@ class OnboardingService(
 		val question = QUESTIONS.find { it.id == request.questionId }
 			?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "알 수 없는 문항이에요")
 
+		val check = conversationAnalyzer.checkAnswer(ConversationTurnInput(question = question, rawAnswerText = request.rawText))
+		if (!check.clear) {
+			return SaveAnswerResult(questionId = question.id, accepted = false, feedback = check.feedback)
+		}
+
 		val userId = requireNotNull(user.id)
 		val turn = onboardingConversationTurnRepository.findByUserIdAndQuestionId(userId, question.id)
 			?: OnboardingConversationTurn(user = user, questionId = question.id, rawAnswerText = request.rawText)
 		turn.rawAnswerText = request.rawText
 		onboardingConversationTurnRepository.save(turn)
 
-		return SavedAnswerResponse(questionId = question.id, rawAnswerText = request.rawText)
+		return SaveAnswerResult(questionId = question.id, accepted = true, feedback = null)
 	}
 
 	// 6문항이 다 모이면 대화 전체를 AI에 한 번에 넘겨서 채점+설명을 같이 받고, 그 채점을
