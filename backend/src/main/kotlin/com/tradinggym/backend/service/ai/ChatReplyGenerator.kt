@@ -1,6 +1,6 @@
 package com.tradinggym.backend.service.ai
 
-import com.tradinggym.backend.chat.ChatRole
+import com.tradinggym.backend.entity.ChatRole
 
 // KnowerBot 채팅창의 자유 대화 한 턴 — ChatMessage 엔티티를 그대로 안 쓰고 이걸로 감싸서
 // 어댑터가 DB 엔티티에 의존하지 않게 함(다른 AI 어댑터들과 같은 원칙).

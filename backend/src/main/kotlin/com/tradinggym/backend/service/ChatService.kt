@@ -1,12 +1,12 @@
 package com.tradinggym.backend.service
 
-import com.tradinggym.backend.chat.ChatMessage
-import com.tradinggym.backend.chat.ChatMessageRepository
-import com.tradinggym.backend.chat.ChatRole
 import com.tradinggym.backend.dto.ChatMessageResponse
+import com.tradinggym.backend.entity.ChatMessage
+import com.tradinggym.backend.entity.ChatRole
+import com.tradinggym.backend.repository.ChatMessageRepository
+import com.tradinggym.backend.repository.UserJpaRepository
 import com.tradinggym.backend.service.ai.ChatReplyGenerator
 import com.tradinggym.backend.service.ai.ChatTurn
-import com.tradinggym.backend.user.UserJpaRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

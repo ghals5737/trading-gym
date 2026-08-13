@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import PriceChart from '../../components/PriceChart';
-import { stockDetail, ranking, riskIntervention } from '../../lib/mock-data';
+import LoginButton from '../../components/LoginButton';
+import { stockDetail, riskIntervention } from '../../lib/mock-data';
+import { getReturnRateRanking, type RankingEntryResponse } from '../../lib/ranking-api';
 import {
   getActiveSession,
   getAvailableTradingDates,
@@ -33,6 +36,7 @@ const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일�
 declare global {
   interface Window {
     knowerbotAskReason?: (question: string) => Promise<string>;
+    knowerbotRequireLogin?: () => void;
   }
 }
 async function askReason(question: string): Promise<string | null> {
@@ -42,6 +46,31 @@ async function askReason(question: string): Promise<string | null> {
   const answer = await window.knowerbotAskReason(question);
   return answer.trim() ? answer.trim() : null;
 }
+
+// knowerbot-runtime.js는 <Script strategy="afterInteractive">라 이 컴포넌트가 먼저
+// 마운트될 수 있음 — window.knowerbotRequireLogin이 아직 없으면 뜰 때까지 잠깐 재시도.
+function notifyKnowerbotLoginRequired() {
+  let attempts = 0;
+  const tryNotify = () => {
+    if (typeof window.knowerbotRequireLogin === 'function') {
+      window.knowerbotRequireLogin();
+      return;
+    }
+    attempts += 1;
+    if (attempts < 20) window.setTimeout(tryNotify, 200);
+  };
+  tryNotify();
+}
+
+// 로그인 안 한 상태로 /simulation에 왔을 때 보여주는 소개 카드 4개 — 랜딩 페이지의
+// features 카드 그리드와 같은 스타일(.card-grid/.card)을 재사용해서 빈 화면 대신
+// 이 페이지에서 실제로 뭘 할 수 있는지 미리 보여줌.
+const SPARRING_LOGIN_FEATURES = [
+  { icon: '1', title: '실제 시세 연동', desc: '삼성전자·SK하이닉스 등 실제 종목의 최근 1년 시세로 진짜 같은 매매를 연습해요.' },
+  { icon: '2', title: '신용거래 체험', desc: '레버리지와 반대매매를 모의로 먼저 겪어보고, 진짜 계좌에서 무너지지 않는 법을 배워요.' },
+  { icon: '3', title: 'AI 코치 채점', desc: '세션이 끝나면 AI가 판단 정확도·리스크 관리 등 8개 지표를 직접 채점해줘요.' },
+  { icon: '4', title: '시즌 랭킹', desc: '다른 사용자들과 수익률로 겨뤄보며 성장 동기를 얻어요.' },
+];
 
 const STARTING_CASH = 10_000_000;
 const MAINTENANCE_RATIO = 1.4; // 담보 유지비율 140% — 백엔드 SimulationService와 동일 기준
@@ -142,9 +171,24 @@ export default function SimulationClient() {
   >(null);
   const [ending, setEnding] = useState(false);
   const [profile, setProfile] = useState<InvestorProfileResponse | null>(null);
+  const [ranking, setRanking] = useState<RankingEntryResponse[]>([]);
+  const [needsLogin, setNeedsLogin] = useState(false);
 
   // 진행 중인 세션 있으면 이어가고, 없으면 시작 날짜를 고르게 함(자동 시작 안 함)
   useEffect(() => {
+    // knowerbot-runtime.js가 아직 안 떠서 document.body 클래스가 안 붙어있어도 이건 항상
+    // 바로 읽을 수 있음(로그인 처리 자체가 이 localStorage 키를 기준으로 이뤄져서) — 로그인
+    // 안 한 상태로 이 API 호출들을 시도해서 401→강제 리다이렉트로 새는 걸 미리 막음.
+    let loggedInNow = false;
+    try {
+      loggedInNow = localStorage.getItem('kg_logged_in') === '1';
+    } catch (e) {}
+    if (!loggedInNow) {
+      setLoading(false);
+      setNeedsLogin(true);
+      notifyKnowerbotLoginRequired();
+      return;
+    }
     (async () => {
       try {
         const [existing, dates] = await Promise.all([getActiveSession(), getAvailableTradingDates()]);
@@ -163,6 +207,8 @@ export default function SimulationClient() {
     })();
     // 온보딩 진단 결과 — 신용거래 경고 강도를 성향별로 차등하는 데 씀. 미진단이면 null(차등 없음).
     getMyInvestorProfile().then(setProfile).catch(() => setProfile(null));
+    // 완료된 세션들 중 유저별 최고 수익률로 줄 세운 랭킹 — 아직 완료 세션이 없으면 빈 배열.
+    getReturnRateRanking().then(setRanking).catch(() => setRanking([]));
   }, []);
 
   // 시작일부터 최소 MIN_RANGE_TRADING_DAYS 거래일 이상 떨어진 날짜만 종료일 후보로 줌 —
@@ -413,6 +459,39 @@ export default function SimulationClient() {
     return <div className="page">불러오는 중...</div>;
   }
 
+  if (needsLogin) {
+    return (
+      <div>
+        <TopNav />
+        <div className="page">
+          <div className="hero">
+            <div className="eyebrow">
+              <span className="badge">짐</span>
+              로그인이 필요해요
+            </div>
+            <h1>로그인하고 스파링을 시작해보세요</h1>
+            <p className="lede">
+              실제 시세 기반 모의투자로 신용거래·반대매매까지 안전하게 연습할 수 있어요. 계정별로
+              진행 상황과 AI 채점 기록이 그대로 저장돼요.
+            </p>
+            <div className="cta-row">
+              <LoginButton className="btn btn-primary">로그인</LoginButton>
+            </div>
+          </div>
+          <div className="card-grid">
+            {SPARRING_LOGIN_FEATURES.map((f) => (
+              <div className="card" key={f.title}>
+                <span className="icon">{f.icon}</span>
+                <h3>{f.title}</h3>
+                <p>{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (completedSummary) {
     const isGain = completedSummary.returnPct >= 0;
     return (
@@ -449,51 +528,70 @@ export default function SimulationClient() {
 
   if (needsStartDate) {
     return (
-      <div style={{ maxWidth: 420, margin: '80px auto', padding: '0 24px' }}>
-        <div className="result-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링 기간을 골라주세요</h2>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
-              실제 시세 데이터 중 시작일과 종료일을 골라 그 기간 동안 모의투자를 진행해요. (최소 {MIN_RANGE_TRADING_DAYS}거래일)
+      <div>
+        <TopNav />
+        <div className="page">
+          <div className="hero">
+            <div className="eyebrow">
+              <span className="badge">짐</span>
+              스파링 준비 중
+            </div>
+            <h1>스파링 기간을 고르면 바로 시작해요</h1>
+            <p className="lede">
+              실제 시세 데이터 중 원하는 구간을 골라 그 기간 동안 모의투자를 진행해요. 신용거래와
+              반대매매까지 안전하게 연습할 수 있어요.
             </p>
           </div>
-          {error && (
-            <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--red-chip)', color: 'var(--red)', fontSize: 13, fontWeight: 700 }}>
-              {error}
+        </div>
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <Link href="/dashboard" className="modal-close" aria-label="닫기">
+              ✕
+            </Link>
+            <div>
+              <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링 기간을 골라주세요</h2>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+                실제 시세 데이터 중 시작일과 종료일을 골라 그 기간 동안 모의투자를 진행해요. (최소 {MIN_RANGE_TRADING_DAYS}거래일)
+              </p>
             </div>
-          )}
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>시작일</label>
-            <select
-              value={startDateChoice}
-              onChange={(e) => setStartDateChoice(e.target.value)}
-              style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
-            >
-              {availableDates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
+            {error && (
+              <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--red-chip)', color: 'var(--red)', fontSize: 13, fontWeight: 700 }}>
+                {error}
+              </div>
+            )}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>시작일</label>
+              <select
+                value={startDateChoice}
+                onChange={(e) => setStartDateChoice(e.target.value)}
+                style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
+              >
+                {availableDates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>종료일</label>
+              <select
+                value={endDateChoice}
+                onChange={(e) => setEndDateChoice(e.target.value)}
+                disabled={validEndDates.length === 0}
+                style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
+              >
+                {validEndDates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button onClick={handleStartSession} disabled={starting || !startDateChoice || !endDateChoice} className="btn btn-primary btn-block">
+              {starting ? '시작하는 중...' : '이 기간으로 시작하기'}
+            </button>
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--soft)', marginBottom: 6 }}>종료일</label>
-            <select
-              value={endDateChoice}
-              onChange={(e) => setEndDateChoice(e.target.value)}
-              disabled={validEndDates.length === 0}
-              style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14 }}
-            >
-              {validEndDates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button onClick={handleStartSession} disabled={starting || !startDateChoice || !endDateChoice} className="btn btn-primary btn-block">
-            {starting ? '시작하는 중...' : '이 기간으로 시작하기'}
-          </button>
         </div>
       </div>
     );
@@ -513,8 +611,8 @@ export default function SimulationClient() {
           </>
         }
       />
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 32px 90px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 400px 280px', gap: 20 }}>
+      <div style={{ maxWidth: 'min(1600px, 94vw)', margin: '0 auto', padding: '32px 40px 90px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 440px 300px', gap: 24 }}>
           {/* left: chart / news / stats */}
           <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="result-card" style={{ minHeight: 294 }}>
@@ -821,35 +919,43 @@ export default function SimulationClient() {
             </div>
           </section>
 
-          {/* right: ranking (아직 mock — 랭킹 API 미구현) */}
+          {/* right: ranking — 완료된 세션들 중 유저별 최고 수익률 기준 */}
           <aside className="result-card" style={{ minHeight: 0, padding: 20 }}>
             <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>이번 시즌 랭킹</h3>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--muted)' }}>
               스파링 시즌 1 · 수익률 기준
             </p>
-            {ranking.map((r) => (
-              <div
-                key={r.rank}
-                style={{
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                  padding: '10px',
-                  borderRadius: 10,
-                  background: r.isMe ? 'var(--green-chip)' : 'transparent',
-                }}
-              >
-                <span style={{ width: 16, fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--muted)' }}>
-                  {r.rank}
-                </span>
-                <span style={{ flex: 1, fontSize: 13, fontWeight: r.isMe ? 800 : 600, color: r.isMe ? 'var(--green)' : 'var(--ink)' }}>
-                  {r.name}
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--soft)' }}>
-                  {r.returnPct}
-                </span>
-              </div>
-            ))}
+            {ranking.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+                아직 종료된 세션이 없어요. 스파링을 끝까지 마치면 랭킹에 올라가요.
+              </p>
+            ) : (
+              ranking.map((r) => (
+                <div
+                  key={r.username}
+                  style={{
+                    display: 'flex',
+                    gap: 10,
+                    alignItems: 'center',
+                    padding: '10px',
+                    borderRadius: 10,
+                    background: r.isMe ? 'var(--green-chip)' : 'transparent',
+                  }}
+                >
+                  <span style={{ width: 16, fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--muted)' }}>
+                    {r.rank}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: r.isMe ? 800 : 600, color: r.isMe ? 'var(--green)' : 'var(--ink)' }}>
+                    {r.username}
+                    {r.isMe ? ' (나)' : ''}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--soft)' }}>
+                    {r.returnPct >= 0 ? '+' : ''}
+                    {r.returnPct.toFixed(1)}%
+                  </span>
+                </div>
+              ))
+            )}
           </aside>
         </div>
       </div>

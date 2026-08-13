@@ -3,12 +3,99 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
+import LoginButton from '../../components/LoginButton';
 import { aiCharacter, user } from '../../lib/mock-data';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { RISK_COPY, KNOWLEDGE_COPY, INFO_HABIT_COPY, headlineFor, warningFor, courseFor } from '../../lib/onboarding-copy';
+import { getMyAggregateStats, SESSION_STAT_LABELS, type AggregateStatResponse, type SessionStatKey } from '../../lib/user-api';
+
+declare global {
+  interface Window {
+    knowerbotRequireLogin?: () => void;
+  }
+}
+
+// knowerbot-runtime.js는 <Script strategy="afterInteractive">라 이 컴포넌트가 먼저
+// 마운트될 수 있음 — window.knowerbotRequireLogin이 아직 없으면 뜰 때까지 잠깐 재시도.
+function notifyKnowerbotLoginRequired() {
+  let attempts = 0;
+  const tryNotify = () => {
+    if (typeof window.knowerbotRequireLogin === 'function') {
+      window.knowerbotRequireLogin();
+      return;
+    }
+    attempts += 1;
+    if (attempts < 20) window.setTimeout(tryNotify, 200);
+  };
+  tryNotify();
+}
+
+// 로그인 안 한 상태로 /my에 왔을 때 보여주는 소개 카드 4개 — 랜딩 페이지의 features
+// 카드 그리드와 같은 스타일(.card-grid/.card)을 재사용해서 빈 화면 대신 이 페이지에서
+// 로그인하면 뭘 볼 수 있는지 미리 보여줌.
+const MY_PAGE_LOGIN_FEATURES = [
+  { icon: '1', title: '투자 성향 진단', desc: '사전 조사로 진단한 리스크 성향·투자 지식·정보 습관 결과를 확인해요.' },
+  { icon: '2', title: 'AI 채점 히스토리', desc: '세션이 끝날 때마다 AI가 채점한 8개 지표가 쌓여서 성장 추이를 볼 수 있어요.' },
+  { icon: '3', title: '나의 AI 캐릭터', desc: '모의투자·학습으로 쌓은 경험치로 캐릭터가 레벨업해요.' },
+  { icon: '4', title: '계정 정보', desc: '닉네임·이메일 같은 계정 정보와 설정을 한곳에서 관리해요.' },
+];
 
 export default function MyClient() {
-  const [tab, setTab] = useState<'profile' | 'diagnosis'>('diagnosis');
+  const [tab, setTab] = useState<'profile' | 'diagnosis' | 'stats'>('diagnosis');
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [checkedLogin, setCheckedLogin] = useState(false);
+
+  useEffect(() => {
+    // knowerbot-runtime.js가 아직 안 떠서 document.body 클래스가 안 붙어있어도 이건
+    // 항상 바로 읽을 수 있음 — 로그인 안 한 상태로 API 호출들이 401→강제 리다이렉트로
+    // 새는 걸 미리 막음(simulation-client.tsx와 같은 원칙).
+    let loggedInNow = false;
+    try {
+      loggedInNow = localStorage.getItem('kg_logged_in') === '1';
+    } catch (e) {}
+    if (!loggedInNow) {
+      setNeedsLogin(true);
+      notifyKnowerbotLoginRequired();
+    }
+    setCheckedLogin(true);
+  }, []);
+
+  if (!checkedLogin) {
+    return null;
+  }
+
+  if (needsLogin) {
+    return (
+      <div>
+        <TopNav />
+        <div className="page">
+          <div className="hero">
+            <div className="eyebrow">
+              <span className="badge">짐</span>
+              로그인이 필요해요
+            </div>
+            <h1>로그인하고 마이 페이지를 확인해보세요</h1>
+            <p className="lede">
+              투자 성향 진단 결과, 세션별 AI 채점 기록, 나의 캐릭터 성장 현황까지 — 전부 계정별로
+              저장돼요.
+            </p>
+            <div className="cta-row">
+              <LoginButton className="btn btn-primary">로그인</LoginButton>
+            </div>
+          </div>
+          <div className="card-grid">
+            {MY_PAGE_LOGIN_FEATURES.map((f) => (
+              <div className="card" key={f.title}>
+                <span className="icon">{f.icon}</span>
+                <h3>{f.title}</h3>
+                <p>{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -18,7 +105,8 @@ export default function MyClient() {
           {(
             [
               ['profile', '사용자 정보'],
-              ['diagnosis', '투자 성향 진단'],
+              ['diagnosis', '사전조사 결과'],
+              ['stats', '스탯'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -40,7 +128,7 @@ export default function MyClient() {
           ))}
         </div>
 
-        {tab === 'profile' ? <ProfileTab /> : <DiagnosisTab />}
+        {tab === 'profile' ? <ProfileTab /> : tab === 'diagnosis' ? <DiagnosisTab /> : <StatsTab />}
       </div>
     </div>
   );
@@ -250,6 +338,63 @@ function DiagnosisTab() {
         <Link href="/onboarding?retake=1" className="btn btn-secondary btn-sm">
           다시 진단받기
         </Link>
+      </div>
+    </>
+  );
+}
+
+const STAT_KEYS = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
+
+// 모의투자 세션을 마칠 때마다 AI가 채점해 쌓이는 8개 지표 — 사전조사 결과(진단 탭)와
+// 다르게 세션이 없으면 보여줄 게 없어서(mock 폴백 없음), 빈 상태를 그대로 안내함.
+function StatsTab() {
+  const [stats, setStats] = useState<AggregateStatResponse[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMyAggregateStats()
+      .then(setStats)
+      .catch((e) => setError(e instanceof Error ? e.message : '스탯을 불러오지 못했어요'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <p style={{ fontSize: 13, color: 'var(--muted)' }}>불러오는 중...</p>;
+  }
+
+  if (error || !stats || stats.length === 0) {
+    return (
+      <div className="result-card" style={{ padding: 24, textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+          {error ?? '아직 완료된 모의투자 세션이 없어요. 스파링을 한 번 끝내면 여기에 AI 채점 결과가 쌓여요.'}
+        </p>
+        <Link href="/simulation" className="btn btn-primary" style={{ marginTop: 14, display: 'inline-block' }}>
+          스파링 시작하러 가기
+        </Link>
+      </div>
+    );
+  }
+
+  const sessionCount = Math.max(...stats.map((s) => s.sessionCount));
+
+  return (
+    <>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+        완료한 세션 {sessionCount}개를 기준으로 지표별 평균을 냈어요. 세션을 더 진행하면 계속 업데이트돼요.
+      </p>
+      <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+        {STAT_KEYS.map((key) => {
+          const { label, suffix, desc } = SESSION_STAT_LABELS[key];
+          const stat = stats.find((s) => s.statKey === key);
+          return (
+            <div className="result-card" key={key}>
+              <span className="result-tag">{label}</span>
+              <h3>{stat ? `${stat.avgScorePct}${suffix}` : '-'}</h3>
+              <p>{desc}</p>
+            </div>
+          );
+        })}
       </div>
     </>
   );

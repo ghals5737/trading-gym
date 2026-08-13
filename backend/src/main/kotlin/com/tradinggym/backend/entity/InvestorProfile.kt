@@ -1,6 +1,5 @@
 package com.tradinggym.backend.entity
 
-import com.tradinggym.backend.user.UserEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType

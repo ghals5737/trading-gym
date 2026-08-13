@@ -10,8 +10,7 @@ import com.tradinggym.backend.entity.TradeSide
 import com.tradinggym.backend.entity.TradeType
 import com.tradinggym.backend.entity.TurnAction
 import com.tradinggym.backend.entity.TurnLog
-import com.tradinggym.backend.user.UserEntity
-import com.tradinggym.backend.user.UserJpaRepository
+import com.tradinggym.backend.entity.UserEntity
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

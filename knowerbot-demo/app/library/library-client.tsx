@@ -17,7 +17,7 @@ export default function LibraryClient() {
   return (
     <div>
       <TopNav right={`자료 ${educationItems.length}건`} />
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '40px 32px 100px' }}>
+      <div style={{ maxWidth: 'min(1600px, 94vw)', margin: '0 auto', padding: '40px 40px 100px' }}>
         <h1 style={{ fontSize: 26 }}>투자교육 자료 모음</h1>
         <div style={{ display: 'flex', gap: 10, margin: '20px 0 24px' }}>
           <div

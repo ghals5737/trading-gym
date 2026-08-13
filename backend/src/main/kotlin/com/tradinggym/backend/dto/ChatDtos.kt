@@ -1,6 +1,6 @@
 package com.tradinggym.backend.dto
 
-import com.tradinggym.backend.chat.ChatRole
+import com.tradinggym.backend.entity.ChatRole
 import java.time.Instant
 
 data class SendChatMessageRequest(

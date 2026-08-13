@@ -25,7 +25,7 @@ import com.tradinggym.backend.repository.StockDailyPriceRepository
 import com.tradinggym.backend.repository.StockNewsRepository
 import com.tradinggym.backend.repository.TradeRepository
 import com.tradinggym.backend.repository.TurnLogRepository
-import com.tradinggym.backend.user.UserJpaRepository
+import com.tradinggym.backend.repository.UserJpaRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -46,6 +46,7 @@ class SimulationService(
 	private val stockDailyPriceRepository: StockDailyPriceRepository,
 	private val stockNewsRepository: StockNewsRepository,
 	private val turnLogRepository: TurnLogRepository,
+	private val sessionSummaryService: SessionSummaryService,
 ) {
 
 	@Transactional
@@ -353,7 +354,9 @@ class SimulationService(
 			// 프론트는 status=COMPLETED를 보고 종료 팝업을 띄우면 됨.
 			session.status = SimulationSessionStatus.COMPLETED
 			session.endedAt = Instant.now()
-			return sessionRepository.save(session).toResponse()
+			val saved = sessionRepository.save(session).toResponse()
+			sessionSummaryService.finalizeAndPersistStats(username, sessionId)
+			return saved
 		}
 		session.currentTurnDate = nextDay.tradeDate
 		session.turnCount += 1
@@ -381,13 +384,17 @@ class SimulationService(
 
 	// 세션을 끝냄 — "재도전 루프"의 시작점. 끝난 세션은 더 이상 매매/턴진행 안 되고,
 	// getActiveSession이 null을 반환하니 프론트가 자연스럽게 새 세션 시작 화면으로 감.
+	// 종료 시점에 AI 채점(SessionStatAnalyzer)을 한 번 계산해서 session_stats에 영구
+	// 저장함 — 세션을 거듭할수록 지표가 어떻게 바뀌는지 성장 추이를 볼 수 있게 하려는 목적.
 	@Transactional
 	fun completeSession(username: String, sessionId: UUID): SessionResponse {
 		val session = requireOwnedActiveSession(username, sessionId)
 		finalizeTurnLog(session) // 마지막 턴(아직 안 닫힌 턴)의 최종 스냅샷 확정
 		session.status = SimulationSessionStatus.COMPLETED
 		session.endedAt = Instant.now()
-		return sessionRepository.save(session).toResponse()
+		val saved = sessionRepository.save(session).toResponse()
+		sessionSummaryService.finalizeAndPersistStats(username, sessionId)
+		return saved
 	}
 
 	// 필터된(수량>0) 종목별 보유 수량 — filled된 BUY/SELL 매매만 집계(HOLD는 종목이 없어서 제외).

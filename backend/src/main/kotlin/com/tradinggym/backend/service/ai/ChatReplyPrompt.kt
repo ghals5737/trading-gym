@@ -1,6 +1,6 @@
 package com.tradinggym.backend.service.ai
 
-import com.tradinggym.backend.chat.ChatRole
+import com.tradinggym.backend.entity.ChatRole
 
 // 다섯 어댑터(ChatReplyGenerator 구현체)가 공유하는 프롬프트 조립 + 대체 답변.
 object ChatReplyPrompt {

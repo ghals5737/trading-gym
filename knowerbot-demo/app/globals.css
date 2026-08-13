@@ -63,12 +63,11 @@ button {
   z-index: 1;
   min-height: 100vh;
 }
-body:not(.logged-in) #stage,
-body:not(.logged-in) #seat-shadow,
-body:not(.logged-in) #bot-bubble,
-body:not(.logged-in) #bot-hitbox,
-body:not(.logged-in) #bot-close,
-body:not(.logged-in) #chat-panel {
+/* 로그인 전에도 로봇(#stage/#bot-hitbox/#bot-bubble)은 보이고 돌아다녀야
+   knowerbotRequireLogin()의 "로그인이 필요해요" 접근+말풍선이 실제로 보임.
+   실제 대화 기능(채팅창)만 로그인 후로 gate. */
+body:not(.logged-in) #chat-panel,
+body:not(.logged-in) #bot-close {
   visibility: hidden;
 }
 /* login modal: hidden until explicitly opened via a "로그인" button, and
@@ -150,6 +149,62 @@ body.login-open:not(.logged-in) #login-overlay {
   line-height: 1.5;
 }
 
+/* ---------- generic modal overlay (스파링 기간 선택 등, 로그인 모달과 별개) ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(rgba(247, 244, 238, 0.86), rgba(247, 244, 238, 0.94)),
+    radial-gradient(circle at 50% 24%, rgba(27, 122, 90, 0.14), transparent 42%);
+}
+:root[data-theme='dark'] .modal-overlay {
+  background: linear-gradient(rgba(22, 21, 15, 0.86), rgba(22, 21, 15, 0.94)),
+    radial-gradient(circle at 50% 24%, rgba(79, 206, 172, 0.12), transparent 42%);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .modal-overlay {
+    background: linear-gradient(rgba(22, 21, 15, 0.86), rgba(22, 21, 15, 0.94)),
+      radial-gradient(circle at 50% 24%, rgba(79, 206, 172, 0.12), transparent 42%);
+  }
+}
+.modal-card {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--white) 94%, transparent);
+  box-shadow: 0 28px 80px rgba(28, 32, 24, 0.18);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--soft);
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.modal-close:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
 /* ---------- top nav ---------- */
 .top-nav {
   height: 64px;
@@ -211,15 +266,15 @@ body.login-open:not(.logged-in) #login-overlay {
 
 /* ---------- generic page primitives ---------- */
 .page {
-  max-width: 1080px;
+  max-width: min(1600px, 94vw);
   margin: 0 auto;
-  padding: 80px 32px 120px;
+  padding: 80px 40px 120px;
   display: flex;
   flex-direction: column;
   gap: 64px;
 }
 .page-narrow {
-  max-width: 800px;
+  max-width: 920px;
   margin: 0 auto;
   padding: 56px 32px 100px;
   display: flex;
@@ -252,22 +307,22 @@ body.login-open:not(.logged-in) #login-overlay {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 720px;
+  max-width: 860px;
 }
 h1 {
-  font-size: 44px;
-  line-height: 1.25;
+  font-size: 50px;
+  line-height: 1.22;
   letter-spacing: -0.02em;
   margin: 0;
   font-weight: 800;
   text-wrap: balance;
 }
 .lede {
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.7;
   color: var(--soft);
   margin: 0;
-  max-width: 560px;
+  max-width: 640px;
 }
 .survey-note {
   margin: 0;
@@ -316,14 +371,14 @@ h1 {
 .card-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 20px;
 }
 .card {
   position: relative;
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 24px;
+  padding: 28px;
   display: flex;
   flex-direction: column;
   gap: 10px;

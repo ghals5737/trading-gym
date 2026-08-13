@@ -216,7 +216,7 @@ const wander = {
 const botState = {
   mode: 'loading',
   baseY: 0,
-  nextSeatAt: 0,
+  nextSeatAt: 8,
   seatStartedAt: 0,
   sitStartedAt: 0,
   jumpStartedAt: 0,
@@ -231,6 +231,7 @@ const botState = {
   swimTargetX: 0,
   chatStartedAt: 0,
   targetScale: 1,
+  tourSelector: null,
 };
 
 function pickWaypoint() {
@@ -259,6 +260,20 @@ if (isLoggedIn) {
   document.body.classList.add('logged-in');
   if (chatInputEl) chatInputEl.disabled = false;
 }
+// 새로고침해도 이전 대화가 사라지지 않게, 페이지 뜨자마자 DB에 저장된 채팅 로그를
+// 미리 불러와서 채팅창(닫혀있어도 DOM엔 이미 그려짐)에 채워둠 — 열어보면 바로 보임.
+let chatHistoryLoaded = false;
+function loadChatHistory() {
+  if (chatHistoryLoaded || !isLoggedIn) return;
+  chatHistoryLoaded = true;
+  authFetch(`${API_BASE}/api/chat/messages`, {})
+    .then((res) => res.json())
+    .then((messages) => {
+      messages.forEach((m) => addChatMessage(m.role === 'USER' ? 'user' : 'bot', m.content));
+    })
+    .catch(() => {});
+}
+if (isLoggedIn) loadChatHistory();
 // 로그인 폼을 거치지 않고(이미 로그인된 채로) 페이지를 새로 열었을 때도 온보딩을
 // 안 했으면 보내야 하므로, startLoggedInDemo()의 리다이렉트와 별개로 여기서도 한 번 확인함.
 // /onboarding 자체에서는 확인 안 함 — 이미 그 페이지에 있는데 또 리다이렉트하면
@@ -271,6 +286,14 @@ if (isLoggedIn && window.location.pathname !== '/onboarding') {
       if (res.status === 204) window.location.replace('/onboarding');
     })
     .catch(() => {});
+}
+// 사전조사(온보딩) 페이지에 온 거 자체가 이미 설문하러 온 거라, 로봇을 클릭 안 해도
+// 자동으로 다가와서 채팅을 열게 함 — 처음 방문이든 "다시 진단받기"로 재방문이든 매번
+// 트리거함(kg_seen_intro_chat 여부와 무관). 모델 로딩 시간을 감안해 살짝 지연.
+if (isLoggedIn && window.location.pathname === '/onboarding') {
+  window.setTimeout(() => {
+    if (isLoggedIn) enterChatMode();
+  }, 1500);
 }
 let pendingStartAfterLogin = false;
 let autoChatTimer = 0;
@@ -499,8 +522,9 @@ function addChatMessage(role, text) {
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
 }
 
-function enterChatMode() {
-  if (!isLoggedIn) return;
+// enterChatMode(로그인 필요)와 knowerbotRequireLogin(로그인 없이도 다가옴, 아래) 둘 다
+// 쓰는 "다가오기" 동작만 뽑아둠 — 로그인 여부에 따라 뭘 물어볼지만 달라짐.
+function approachForChat() {
   setSeatAffordance(false);
   shadowDecal.visible = true;
   setChatOpen(false);
@@ -511,9 +535,26 @@ function enterChatMode() {
   botState.targetZ = target.z;
   botState.targetScale = target.scale;
   botState.chatStartedAt = performance.now() / 1000;
-  showBubble('불렀어요? 앞으로 갈게요.');
   setAction('walking');
 }
+
+function enterChatMode() {
+  if (!isLoggedIn) {
+    window.knowerbotRequireLogin();
+    return;
+  }
+  approachForChat();
+}
+
+// 로그인 안 한 채로 /simulation, /my처럼 로그인이 꼭 필요한 페이지에 들어오면 React 쪽에서
+// 이걸 불러서 로봇이 다가와 "로그인이 필요해요"라고 알려주게 함 — 실제 로그인은 유저가
+// 네비게이션의 로그인 버튼을 직접 눌러서 함(여기서 로그인 모달을 자동으로 열진 않음).
+let pendingLoginPrompt = false;
+window.knowerbotRequireLogin = function () {
+  if (isLoggedIn) return;
+  pendingLoginPrompt = true;
+  approachForChat();
+};
 
 function exitChatMode() {
   if (botState.mode !== 'approachChat' && botState.mode !== 'chatIdle') return;
@@ -526,6 +567,48 @@ function exitChatMode() {
   showBubble('나중에 또 불러주세요!', 2400);
   setAction('walking', 0.15);
 }
+
+// 첫 방문 가이드 투어(ProductTour, React)가 스텝마다 부르는 함수 — 셀렉터로 가리키는
+// nav 탭 쪽으로 걸어가서 서있게 함. 항상 셀렉터로 다시 찾게 해서(엘리먼트를 캐시하지
+// 않음) 투어가 페이지를 이동시켜도(같은 selector가 새 페이지의 TopNav에도 있음)
+// 자연스럽게 다시 그 탭 쪽으로 걸어감 — 페이지 전환 중 잠깐 못 찾아도 마지막으로 알던
+// 위치를 유지하다가 새 페이지가 뜨면 바로 이어서 따라감.
+function tourTargetFor(selector) {
+  const el = selector ? document.querySelector(selector) : null;
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  const seatX = rect.left + rect.width * 0.5;
+  const seatY = rect.bottom + 4;
+  const world = screenToWorld(seatX, seatY, WALK_Z);
+  return { x: world.x, y: world.y + 0.9 };
+}
+
+window.knowerbotPointAt = function (selector) {
+  // 신규 계정은 로그인 3초 뒤 "첫 채팅 인사"도 예약돼 있어서(kg_seen_intro_chat),
+  // 투어랑 동시에 처음 로그인하면 그 타이머가 나중에 끼어들어 투어 중 모드를 가로챌 수
+  // 있음 — 투어가 시작되면 그 인사 타이머는 취소함(투어 자체가 인사를 대신함).
+  clearTimeout(autoChatTimer);
+  botState.tourSelector = selector;
+  setChatOpen(false);
+  setSeatAffordance(false);
+  botState.targetScale = 1;
+  botState.targetZ = WALK_Z;
+  const target = tourTargetFor(selector);
+  if (target) {
+    botState.targetX = target.x;
+    botState.targetY = target.y;
+  }
+  botState.mode = 'approachTourPoint';
+  setAction('walking');
+};
+
+window.knowerbotStopPointing = function () {
+  if (botState.mode !== 'approachTourPoint' && botState.mode !== 'tourPoint') return;
+  botState.tourSelector = null;
+  pickWaypoint();
+  botState.mode = 'wander';
+  setAction('walking', 0.15);
+};
 
 async function startLoggedInDemo() {
   if (isLoggedIn) return;
@@ -546,6 +629,13 @@ async function startLoggedInDemo() {
     }
   } catch (e) {}
 
+  // 온보딩까지 다 끝난 계정이면 로그인하자마자 바로 대시보드로 — 랜딩 페이지 등
+  // 다른 곳에 머무르지 않음(이미 대시보드에 있었으면 그냥 이 페이지에서 계속 진행).
+  if (window.location.pathname !== '/dashboard') {
+    window.location.replace('/dashboard');
+    return;
+  }
+
   setChatOpen(false);
   showBubble('반가워요. 먼저 흐름을 살펴볼게요.', 3000);
   if (botState.mode === 'loading' || !actions.swimming) {
@@ -558,6 +648,11 @@ async function startLoggedInDemo() {
 function startPostLoginSwim() {
   pendingStartAfterLogin = false;
   clearTimeout(autoChatTimer);
+  // ProductTour(React)가 모델 로딩이 끝나기 전에 이미 knowerbotPointAt으로 어디론가
+  // 걸어가고 있는 중이면(신규 계정은 첫 로그인 인사랑 투어가 동시에 걸릴 수 있음)
+  // 여기서 mode를 'wander'로 되돌리거나 인사 타이머를 다시 걸지 않음 — 투어가 곧
+  // "첫 인사" 역할까지 대신하는 셈이라 서로 안 겹치게 함.
+  if (botState.tourSelector) return;
   setSeatAffordance(false);
   shadowDecal.visible = true;
   botState.targetScale = 1;
@@ -698,9 +793,16 @@ function maybeStartOnboardingSurvey() {
     .catch(() => greetInChat());
 }
 
+// 부를 때마다(챗 다시 열 때마다) 이 인사말이 대화창에 매번 새로 쌓이면 실제 대화 내용이
+// 안 보이고 이 문구만 반복돼서 지저분해짐 — 채팅 로그에는 페이지당 한 번만 남기고,
+// 말풍선은 부를 때마다 가볍게 보여줌(로그에는 안 쌓이니 반복돼도 괜찮음).
+let greetedThisPageLoad = false;
 function greetInChat() {
   showBubble('무엇을 같이 볼까요?', 4200);
-  addChatMessage('bot', '무엇을 같이 볼까요?');
+  if (!greetedThisPageLoad) {
+    greetedThisPageLoad = true;
+    addChatMessage('bot', '무엇을 같이 볼까요?');
+  }
   if (chatInputEl) chatInputEl.focus();
 }
 
@@ -905,6 +1007,11 @@ function shortestAngleDelta(from, to) {
 //   1번 — 걸어가서 위젯에 앉는다 (approachSeat → sitting → jumpDown)
 //   2번 — 점프해서 위젯을 붙잡고 매달려 있다가 떨어진다 (approachSeat → jumpGrab → hangSwing → fallOff)
 function startSeatSequence() {
+  // nextSeatAt을 여기서 항상 먼저 미뤄둠 — 안 그러면(타겟을 못 찾아 아래에서 return하든,
+  // 시퀀스가 시작되든) 다음 프레임에 바로 또 시도해서 매 프레임 재시도(사실상 쿨다운 없음)
+  // 되거나, 위젯 방문이 끝나자마자 wander로 돌아온 즉시 또 새 방문이 시작돼 버림 —
+  // 원래 의도는 "가끔 위젯을 들르며 대부분은 그냥 돌아다니는" 느낌이었음.
+  botState.nextSeatAt = performance.now() / 1000 + 10 + Math.random() * 12;
   const sequence = Math.random() < 0.5 ? 1 : 2;
   botState.seatSequence = sequence;
   botState.seatEl = pickSeatElement(sequence);
@@ -1113,6 +1220,10 @@ new GLTFLoader().load(
       setAction('idle', 0);
       if (isLoggedIn || pendingStartAfterLogin) {
         startPostLoginSwim();
+      } else if (pendingLoginPrompt || botState.mode === 'approachChat' || botState.mode === 'chatIdle') {
+        // 모델 로딩 중에 knowerbotRequireLogin()이 이미 다가오라고 지시해놨으면
+        // (로그인 안 한 채로 /simulation, /my 등에 온 경우) 그 상태를 덮어쓰지 않음 —
+        // 안 그러면 로딩이 늦게 끝났을 때 다가오다 말고 도로 'ready'로 얼어붙음.
       } else {
         botState.mode = 'ready';
       }
@@ -1151,7 +1262,7 @@ function animate() {
       if (dist < 0.15 && now > wander.pauseUntil) {
         pickWaypoint();
         wander.pauseUntil = now + 0.8 + Math.random() * 1.6;
-        setAction(Math.random() < 0.25 && actions.flair ? 'flair' : 'idle');
+        setAction('idle');
       } else if (dist >= 0.15) {
         moveTowardX(wander.targetX, wander.speed, 1.8, dt);
         setAction('walking');
@@ -1198,6 +1309,11 @@ function animate() {
             chatInputEl.disabled = false;
             chatInputEl.focus();
           }
+        } else if (pendingLoginPrompt) {
+          pendingLoginPrompt = false;
+          addChatMessage('bot', '이 페이지는 로그인해야 이용할 수 있어요. 오른쪽 위 로그인 버튼을 눌러주세요.');
+          showBubble('로그인이 필요해요', 3000);
+          if (chatInputEl) chatInputEl.disabled = true; // 로그인 전엔 채팅도 못 쓰니 입력 막아둠
         } else {
           maybeStartOnboardingSurvey();
         }
@@ -1213,6 +1329,35 @@ function animate() {
       rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 3.5);
       rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 3.5)));
       rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3.5);
+      setAction('idle');
+    } else if (botState.mode === 'approachTourPoint') {
+      const target = tourTargetFor(botState.tourSelector);
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+      }
+      const dx = botState.targetX - rig.position.x;
+      if (Math.abs(dx) > 0.16) {
+        moveTowardX(botState.targetX, 0.55, 2.2, dt);
+        setAction('walking');
+      } else {
+        botState.velocityX = 0;
+        botState.mode = 'tourPoint';
+        setAction('idle');
+      }
+      rig.position.y = botState.baseY;
+    } else if (botState.mode === 'tourPoint') {
+      // 페이지가 이동하면(투어가 다음 스텝으로 넘어가면) 같은 셀렉터가 새 페이지에도
+      // 있어서 타겟 좌표가 갱신됨 — approachTourPoint로 안 돌아가고 여기서 그냥
+      // 부드럽게 따라가게 해서 매 스텝 재접근 모션 없이 자연스럽게 이어짐.
+      const target = tourTargetFor(botState.tourSelector);
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+      }
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 3);
+      rig.position.y = botState.baseY + Math.sin(t * 2.0) * 0.02;
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3);
       setAction('idle');
     } else if (botState.mode === 'approachSeat') {
       const target = seatTarget();

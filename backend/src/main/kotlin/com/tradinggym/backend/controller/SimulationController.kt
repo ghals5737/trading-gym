@@ -5,10 +5,13 @@ import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.QuoteResponse
 import com.tradinggym.backend.dto.SessionResponse
+import com.tradinggym.backend.dto.SessionStatScoreResponse
+import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
+import com.tradinggym.backend.service.SessionSummaryService
 import com.tradinggym.backend.service.SimulationService
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -26,6 +29,7 @@ import java.util.UUID
 @RequestMapping("/api/sessions")
 class SimulationController(
 	private val simulationService: SimulationService,
+	private val sessionSummaryService: SessionSummaryService,
 ) {
 
 	@GetMapping("/available-dates")
@@ -112,4 +116,16 @@ class SimulationController(
 	@GetMapping("/{sessionId}/turn-logs")
 	fun listTurnLogs(authentication: Authentication, @PathVariable sessionId: UUID): List<TurnLogResponse> =
 		simulationService.listTurnLogs(authentication.name, sessionId)
+
+	// turn_logs + trades를 턴 단위로 통째로 묶은 세션 종합 — 나중에 "추천 교육자료/오늘의
+	// PT"를 LLM한테 받는 기능의 프롬프트 재료로 쓸 예정. 지금은 이 API 자체가 그 준비 단계.
+	@GetMapping("/{sessionId}/summary")
+	fun getSessionSummary(authentication: Authentication, @PathVariable sessionId: UUID): SessionSummaryResponse =
+		sessionSummaryService.getSessionSummary(authentication.name, sessionId)
+
+	// summary를 AI(SessionStatAnalyzer)에 넘겨서 받은 8개 지표 채점 — reasonText까지 읽고
+	// 판단한 결과라 순수 규칙 계산보다 오래 걸릴 수 있음.
+	@GetMapping("/{sessionId}/stats")
+	fun getSessionStats(authentication: Authentication, @PathVariable sessionId: UUID): List<SessionStatScoreResponse> =
+		sessionSummaryService.getSessionStats(authentication.name, sessionId)
 }

@@ -11,7 +11,7 @@ export default function NewsClient() {
   return (
     <div>
       <TopNav right="뉴스 해설" />
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '36px 32px 90px' }}>
+      <div style={{ maxWidth: 'min(1600px, 94vw)', margin: '0 auto', padding: '36px 40px 90px' }}>
         <h1 style={{ fontSize: 24 }}>뉴스 분석 어시스턴트</h1>
         <p style={{ margin: '4px 0 24px', fontSize: 13, color: 'var(--muted)' }}>
           어려운 경제 뉴스, KnowerBot이 초보자 눈높이로 풀어드려요.

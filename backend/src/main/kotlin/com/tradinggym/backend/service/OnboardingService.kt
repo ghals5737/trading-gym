@@ -18,7 +18,7 @@ import com.tradinggym.backend.repository.InvestorProfileRepository
 import com.tradinggym.backend.repository.OnboardingConversationTurnRepository
 import com.tradinggym.backend.service.ai.ConversationAnalyzer
 import com.tradinggym.backend.service.ai.ConversationTurnInput
-import com.tradinggym.backend.user.UserJpaRepository
+import com.tradinggym.backend.repository.UserJpaRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
