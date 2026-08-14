@@ -41,3 +41,10 @@ openai:
 gemini:
   api-key: ${GEMINI_API_KEY:}
   model: ${GEMINI_MODEL:gemini-2.0-flash}
+
+education:
+  search:
+    # edu-rag-indexer/web_search.py가 떠 있는 주소. 임베딩 모델이 파이썬 전용 라이브러리라
+    # 별도 프로세스로 돌리고 여기선 HTTP로만 호출함 — 꺼져있으면 근거 자료 없이 채팅함
+    # (EducationSearchClient가 예외를 삼키고 빈 리스트를 돌려줌).
+    base-url: ${EDUCATION_SEARCH_URL:http://localhost:8123}

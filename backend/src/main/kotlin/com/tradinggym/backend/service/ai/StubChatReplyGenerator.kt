@@ -1,5 +1,6 @@
 package com.tradinggym.backend.service.ai
 
+import com.tradinggym.backend.service.EducationSearchResult
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -8,7 +9,7 @@ import org.springframework.stereotype.Component
 @Component
 @ConditionalOnProperty(name = ["ai.provider"], havingValue = "stub", matchIfMissing = true)
 class StubChatReplyGenerator : ChatReplyGenerator {
-	override fun reply(history: List<ChatTurn>, newMessage: String): String = when {
+	override fun reply(history: List<ChatTurn>, newMessage: String, ragContext: List<EducationSearchResult>): String = when {
 		Regex("위험|리스크|손실|레버리지").containsMatchIn(newMessage) ->
 			"좋아요. 지금은 레버리지 비중과 손절 기준을 먼저 확인하는 흐름으로 볼게요."
 		else -> "좋아요. 지금 화면을 기준으로 같이 확인해볼게요."

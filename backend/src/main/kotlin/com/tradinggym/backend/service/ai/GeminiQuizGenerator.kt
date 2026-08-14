@@ -1,7 +1,6 @@
 package com.tradinggym.backend.service.ai
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
-import com.tradinggym.backend.service.EducationSearchResult
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -11,46 +10,46 @@ import org.springframework.web.client.RestClient
 
 @Component
 @ConditionalOnProperty(name = ["ai.provider"], havingValue = "gemini")
-class GeminiChatReplyGenerator(
+class GeminiQuizGenerator(
 	@Value("\${gemini.api-key}") private val apiKey: String,
 	@Value("\${gemini.model}") private val model: String,
-) : ChatReplyGenerator {
+) : QuizGenerator {
 
 	private val log = LoggerFactory.getLogger(javaClass)
 	private val client = RestClient.create("https://generativelanguage.googleapis.com")
 
-	override fun reply(history: List<ChatTurn>, newMessage: String, ragContext: List<EducationSearchResult>): String {
+	override fun generate(input: QuizGenerationInput): GeneratedQuiz? {
 		if (apiKey.isBlank()) {
-			log.warn("GEMINI_API_KEY가 비어있어 대체 답변으로 처리합니다")
-			return ChatReplyPrompt.fallbackReply()
+			log.warn("GEMINI_API_KEY가 비어있어 퀴즈를 만들 수 없습니다")
+			return null
 		}
 		return try {
-			val prompt = ChatReplyPrompt.build(history, newMessage, ragContext)
+			val prompt = QuizGenerationPrompt.build(input)
 			val response = client.post()
 				.uri("/v1beta/models/{model}:generateContent?key={apiKey}", model, apiKey)
 				.contentType(MediaType.APPLICATION_JSON)
-				.body(GeminiChatRequest(contents = listOf(GeminiChatContent(parts = listOf(GeminiChatPart(prompt))))))
+				.body(GeminiQuizRequest(contents = listOf(GeminiQuizContent(parts = listOf(GeminiQuizPart(prompt))))))
 				.retrieve()
-				.body(GeminiChatResponse::class.java)
+				.body(GeminiQuizResponse::class.java)
 			val text = response?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text.orEmpty()
-			ChatReplyPrompt.parse(text)
+			QuizGenerationPrompt.parse(text)
 		} catch (e: Exception) {
-			log.warn("Gemini 채팅 답변 실패, 대체 답변으로 처리: ${e.message}")
-			ChatReplyPrompt.fallbackReply()
+			log.warn("Gemini 퀴즈 생성 실패: ${e.message}")
+			null
 		}
 	}
 }
 
-private data class GeminiChatRequest(val contents: List<GeminiChatContent>)
+private data class GeminiQuizRequest(val contents: List<GeminiQuizContent>)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-private data class GeminiChatContent(val parts: List<GeminiChatPart> = emptyList())
+private data class GeminiQuizContent(val parts: List<GeminiQuizPart> = emptyList())
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-private data class GeminiChatPart(val text: String = "")
+private data class GeminiQuizPart(val text: String = "")
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-private data class GeminiChatResponse(val candidates: List<GeminiChatCandidate> = emptyList())
+private data class GeminiQuizResponse(val candidates: List<GeminiQuizCandidate> = emptyList())
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-private data class GeminiChatCandidate(val content: GeminiChatContent = GeminiChatContent())
+private data class GeminiQuizCandidate(val content: GeminiQuizContent = GeminiQuizContent())

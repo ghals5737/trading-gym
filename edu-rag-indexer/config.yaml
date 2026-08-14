@@ -1,0 +1,45 @@
+# edu-rag-indexer 설정
+# 경로는 이 파일이 있는 디렉터리 기준 상대경로다.
+
+paths:
+  # PDF 원본과 sources.csv가 있는 곳. 저장소 루트의 data/를 그대로 쓴다.
+  data_dir: ../data
+  raw_subdir: raw
+  sources_csv: sources.csv
+
+parsing:
+  # 페이지당 이 글자 수 미만이면 텍스트 레이어가 없는 스캔본으로 간주 → NEEDS_OCR (SPEC 4-2)
+  scan_min_chars_per_page: 50
+  # 전체 페이지의 이 비율 이상에서 반복되는 짧은 줄은 머리글/바닥글로 보고 제거
+  header_footer_min_ratio: 0.5
+  # 각 페이지의 앞/뒤 몇 줄까지를 머리글·바닥글 후보로 볼지
+  header_footer_scan_lines: 2
+  # 목차로 판정된 페이지 건너뛰기
+  skip_toc: true
+  # (cid:###) · U+FFFD 비율이 이보다 높으면 폰트 매핑이 깨진 것으로 보고 제외
+  garbled_max_ratio: 0.02
+
+chunking:
+  chunk_size: 800
+  overlap: 150
+  min_chunk_size: 100
+
+embedding:
+  # local(기본, 키 불필요) | openai
+  backend: local
+  batch_size: 16
+  local:
+    model: BAAI/bge-m3
+    dimension: 1024
+    # cpu 고정. Apple Silicon의 mps에서는 짧은 텍스트를 단독 인코딩할 때 벡터가 깨져서
+    # 검색(질의 1건 인코딩)이 통째로 망가진다 — 실측으로 확인함. 자세한 내용은 README 참고.
+    device: cpu
+  openai:
+    model: text-embedding-3-small
+    dimension: 1536
+    api_key_env: OPENAI_API_KEY
+
+database:
+  # DATABASE_URL이 있으면 그걸 쓰고, 없으면 default_url.
+  url_env: DATABASE_URL
+  default_url: postgresql:///trading_gym_rag

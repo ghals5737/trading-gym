@@ -7,6 +7,7 @@ import com.tradinggym.backend.repository.ChatMessageRepository
 import com.tradinggym.backend.repository.UserJpaRepository
 import com.tradinggym.backend.service.ai.ChatReplyGenerator
 import com.tradinggym.backend.service.ai.ChatTurn
+import com.tradinggym.backend.service.ai.SearchQueryRewriter
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -19,6 +20,8 @@ class ChatService(
 	private val userJpaRepository: UserJpaRepository,
 	private val chatMessageRepository: ChatMessageRepository,
 	private val chatReplyGenerator: ChatReplyGenerator,
+	private val educationSearchClient: EducationSearchClient,
+	private val searchQueryRewriter: SearchQueryRewriter,
 ) {
 
 	fun getHistory(username: String): List<ChatMessageResponse> {
@@ -44,8 +47,18 @@ class ChatService(
 
 		chatMessageRepository.save(ChatMessage(user = user, role = ChatRole.USER, content = text))
 
-		val replyText = chatReplyGenerator.reply(recentHistory, text)
-		val botMessage = chatMessageRepository.save(ChatMessage(user = user, role = ChatRole.ASSISTANT, content = replyText))
+		// "그거 왜 위험한데?"처럼 대명사로만 된 메시지는 그대로 검색하면 헛돌아서, 대화 맥락을
+		// 참고해 독립적인 검색어로 먼저 바꿈(실패하면 원문 그대로 — SearchQueryRewritePrompt.fallback).
+		val searchQuery = searchQueryRewriter.rewrite(recentHistory, text)
+		// edu-rag-indexer가 죽어있거나 관련 자료가 없으면 빈 리스트가 오고, 그럼 근거 없이
+		// 평소처럼 답함(EducationSearchClient가 흡수함).
+		val ragContext = educationSearchClient.search(searchQuery)
+		val replyText = chatReplyGenerator.reply(recentHistory, text, ragContext)
+		// 출처 표기는 LLM 판단에 안 맡기고(생략할 때가 있음) 실제로 검색에 쓰인 자료 목록으로
+		// 여기서 확정적으로 붙임 — 답변 내용이 아니라 "이 답변이 참고한 근거가 있는지"를
+		// 항상 같은 형식으로 보여주기 위함.
+		val fullReplyText = replyText + buildSourceFootnote(ragContext)
+		val botMessage = chatMessageRepository.save(ChatMessage(user = user, role = ChatRole.ASSISTANT, content = fullReplyText))
 
 		return botMessage.toResponse()
 	}
@@ -53,6 +66,24 @@ class ChatService(
 	private fun requireUser(username: String) =
 		userJpaRepository.findByUsername(username)
 			?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다")
+
+	// 같은 문서에서 나온 청크(페이지만 다름)는 한 줄로 묶어서 보여줌 — 안 그러면 같은 자료가
+	// "134쪽", "134-135쪽"처럼 여러 줄로 중복 표시됨(레버리지 질의에서 실제로 겪은 케이스).
+	private fun buildSourceFootnote(ragContext: List<EducationSearchResult>): String {
+		if (ragContext.isEmpty()) return ""
+		val lines = ragContext
+			.groupBy { it.orgName to it.title }
+			.entries
+			.joinToString("\n") { (key, items) ->
+				val (org, title) = key
+				val pages = items
+					.mapNotNull { r -> r.pageStart?.let { start -> if (start == r.pageEnd) "${start}쪽" else "${start}-${r.pageEnd}쪽" } }
+					.distinct()
+					.joinToString(", ")
+				"· ${org ?: "출처 미상"} 「$title」${if (pages.isNotBlank()) " $pages" else ""}"
+			}
+		return "\n\n📚 참고 자료\n$lines"
+	}
 
 	companion object {
 		private const val MAX_MESSAGE_LENGTH = 500

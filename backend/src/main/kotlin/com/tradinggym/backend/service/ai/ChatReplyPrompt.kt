@@ -1,13 +1,31 @@
 package com.tradinggym.backend.service.ai
 
 import com.tradinggym.backend.entity.ChatRole
+import com.tradinggym.backend.service.EducationSearchResult
 
 // 다섯 어댑터(ChatReplyGenerator 구현체)가 공유하는 프롬프트 조립 + 대체 답변.
 object ChatReplyPrompt {
 
-	fun build(history: List<ChatTurn>, newMessage: String): String {
+	fun build(history: List<ChatTurn>, newMessage: String, ragContext: List<EducationSearchResult> = emptyList()): String {
 		val transcript = history.joinToString("\n") {
 			"${if (it.role == ChatRole.USER) "사용자" else "KnowerBot"}: ${it.content}"
+		}
+
+		val ragSection = if (ragContext.isEmpty()) {
+			""
+		} else {
+			val sources = ragContext.joinToString("\n\n") { r ->
+				val pages = if (r.pageStart != null) {
+					if (r.pageStart == r.pageEnd) " · ${r.pageStart}쪽" else " · ${r.pageStart}-${r.pageEnd}쪽"
+				} else ""
+				"[${r.orgName ?: "출처 미상"} · ${r.title}$pages]\n${r.content}"
+			}
+			"""
+
+				참고 자료(공신력 있는 금융교육 자료에서 검색된 발췌 — 답변에 도움이 되면 활용하고
+				출처(기관·자료명·쪽수)를 자연스럽게 언급해. 질문이랑 안 맞으면 그냥 무시하고 평소처럼 답해):
+				$sources
+			""".trimIndent()
 		}
 
 		return """
@@ -15,6 +33,7 @@ object ChatReplyPrompt {
 			사용자와 채팅으로 자유롭게 대화 중이야. 투자·리스크 관리·이 서비스 사용법 질문이면
 			최대한 도움이 되게 답하고, 그 외의 잡담이어도 자연스럽게 받아주면 돼.
 			존댓말로, 친근하지만 전문적인 톤으로, 1~3문장 정도로 짧게 답해.
+			$ragSection
 
 			${if (transcript.isNotBlank()) "지금까지 대화:\n$transcript\n" else ""}
 			사용자: $newMessage

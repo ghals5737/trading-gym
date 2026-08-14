@@ -788,6 +788,14 @@ function maybeStartOnboardingSurvey() {
         greetInChat();
         return;
       }
+      // 프로필이 없으면 지금 있던 페이지(예: /simulation, /library)에서 그 자리에 바로
+      // 설문을 시작하지 않고, 사전조사 전용 페이지로 보냄 — 다른 페이지 내용 위에 채팅으로
+      // 설문이 겹쳐 보이는 게 어색해서. /onboarding에선 그 페이지의 자동 접근 로직이
+      // 다시 이 함수를 불러서(pathname이 이미 맞으니) 곧바로 설문을 시작함.
+      if (window.location.pathname !== '/onboarding') {
+        window.location.replace('/onboarding');
+        return;
+      }
       startOnboardingSurvey();
     })
     .catch(() => greetInChat());

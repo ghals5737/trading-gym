@@ -1,0 +1,28 @@
+# 로컬에 Postgres가 없을 때 쓰는 대안 (SPEC 7절).
+# 이미 로컬 Postgres를 쓰고 있다면 이 파일은 필요 없다.
+#
+#   docker compose up -d
+#   export DATABASE_URL="postgresql://postgres:postgres@localhost:5433/trading_gym_rag"
+#
+# 호스트의 기본 5432와 부딪히지 않게 5433으로 내보낸다.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: edu-rag-postgres
+    environment:
+      POSTGRES_DB: trading_gym_rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trading_gym_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
