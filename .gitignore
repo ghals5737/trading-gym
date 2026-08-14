@@ -1,2 +1,13 @@
 .DS_Store
 .claude/
+
+# RAG 원본 PDF — 용량이 크고 배포 대상이 아니다(저작권도 각 기관 소유).
+# 메타데이터인 data/sources.csv는 커밋한다.
+data/raw/
+data/catalog.jsonl
+
+# Node 빌드 산출물
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo

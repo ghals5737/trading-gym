@@ -1,0 +1,9 @@
+pymupdf>=1.24
+psycopg[binary]>=3.1
+PyYAML>=6.0
+
+# local 임베딩 백엔드(기본값)에 필요. openai 백엔드만 쓸 거면 빼도 된다.
+sentence-transformers>=3.0
+
+# openai 백엔드를 쓸 때만
+# openai>=1.0
