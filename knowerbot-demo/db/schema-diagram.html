@@ -236,11 +236,11 @@
     </p>
   </div>
 
-  <div class="status-chip">✓ 테이블 11개, 전부 실제로 쓰이는 중 — 사용처 없던 상황퀴즈·교육콘텐츠(RAG)·XP/캐릭터 스캐폴딩은 2026-08-14에 정리해서 삭제함</div>
+  <div class="status-chip">✓ 테이블 10개, 전부 실제로 쓰이는 중 — 사용처 없던 상황퀴즈·교육콘텐츠(RAG)·XP/캐릭터·위험개입 스캐폴딩은 2026-08-14에 정리해서 삭제함</div>
 
   <section>
     <h2>전체 ER 다이어그램</h2>
-    <p class="section-sub">테이블 11개 전체 관계도 — 컬럼 상세는 아래 도메인별 다이어그램 참고</p>
+    <p class="section-sub">테이블 10개 전체 관계도 — 컬럼 상세는 아래 도메인별 다이어그램 참고</p>
     <div class="diagram-card">
       <pre class="mermaid">
 erDiagram
@@ -251,15 +251,13 @@ erDiagram
 
     simulation_sessions ||--o{ turn_logs : "턴마다"
     simulation_sessions ||--o{ trades : ""
-    simulation_sessions ||--o{ risk_interventions : ""
     simulation_sessions ||--o{ session_stats : "완료 시 8개"
     turn_logs ||--o{ trades : "그 턴의 매매"
-    trades |o--o{ risk_interventions : "개입 후 매매(있다면)"
       </pre>
     </div>
     <p class="section-sub" style="margin: 12px 0 0;">
       <b>인증(users)</b>을 중심으로 <b>사전조사</b>(진단 결과·문항 답변),
-      <b>모의투자</b>(세션·턴·매매·위험개입·스탯), <b>채팅</b>이 각각 매달려 있는 구조예요.
+      <b>모의투자</b>(세션·턴·매매·스탯), <b>채팅</b>이 각각 매달려 있는 구조예요.
       <code>stock_daily_prices</code>·<code>stock_news</code>는 유저와 무관한 전역 시세 데이터라
       이 다이어그램엔 안 나와요.
     </p>
@@ -334,9 +332,7 @@ erDiagram
     users ||--o{ simulation_sessions : ""
     simulation_sessions ||--o{ turn_logs : ""
     simulation_sessions ||--o{ trades : ""
-    simulation_sessions ||--o{ risk_interventions : ""
     turn_logs ||--o{ trades : "그 턴의 매매"
-    trades |o--o{ risk_interventions : "개입 후 매매"
 
     simulation_sessions {
         uuid id PK
@@ -390,18 +386,13 @@ erDiagram
         timestamptz created_at
     }
 
-    risk_interventions {
-        uuid id PK
-        uuid session_id FK
-        uuid trade_id FK "개입 후 실제 매매(있다면)"
-        varchar risk_type "과도한레버리지·몰빵·추격매수·손절지연"
-        text message "그 순간 보여준 경고 문구"
-        varchar user_response "HEEDED·IGNORED"
-        date simulated_trade_date
-        timestamptz created_at
-    }
       </pre>
     </div>
+    <p class="section-sub" style="margin: 12px 0 0;">
+      <code>/simulation</code>의 신용매수 경고 모달(RiskInterventionModal)은 프론트에만 있고
+      유저가 무시했는지/받아들였는지를 기록하는 백엔드는 없어요 — <code>risk_interventions</code>
+      테이블은 사용처 없는 스캐폴딩이라 2026-08-14에 삭제함.
+    </p>
   </section>
 
   <section>
@@ -524,7 +515,7 @@ erDiagram
       </div>
       <div class="decision">
         <p class="q">상황퀴즈·교육콘텐츠(RAG)·XP/캐릭터 테이블은 왜 없어졌나?</p>
-        <p class="a">스캐폴딩(엔티티+레포지토리)만 있고 실제로 쓰는 서비스·컨트롤러가 하나도 없는 상태로 오래 방치돼 있었어요. 2026-08-14에 사용처 0건인 걸 확인하고 정리(테이블 11개 → 지금 11개는 전부 실사용 중인 것만 남음). RAG는 <code>lib/education-content.ts</code>에 콘텐츠(글 10개)는 이미 써져 있고, 임베딩 파이프라인부터 다시 설계해서 만들 예정 — 그때 <code>education_articles</code>/<code>education_chunks</code>를 다시 만들면서 pgvector 컬럼도 이번엔 제대로 붙일 계획.</p>
+        <p class="a">스캐폴딩(엔티티+레포지토리)만 있고 실제로 쓰는 서비스·컨트롤러가 하나도 없는 상태로 오래 방치돼 있었어요. 2026-08-14에 사용처 0건인 걸 확인하고 정리 — 같은 날 <code>risk_interventions</code>(프론트 모달은 있지만 응답을 저장하는 백엔드가 없던 것)도 같은 이유로 삭제해서, 지금 남은 10개 테이블은 전부 실사용 중인 것만 남음. RAG는 <code>lib/education-content.ts</code>에 콘텐츠(글 10개)는 이미 써져 있고, 임베딩 파이프라인부터 다시 설계해서 만들 예정 — 그때 <code>education_articles</code>/<code>education_chunks</code>를 다시 만들면서 pgvector 컬럼도 이번엔 제대로 붙일 계획.</p>
       </div>
       <div class="decision">
         <p class="q">사전조사(온보딩)와 모의투자 스탯을 왜 같은 항목으로 안 맞췄나?</p>

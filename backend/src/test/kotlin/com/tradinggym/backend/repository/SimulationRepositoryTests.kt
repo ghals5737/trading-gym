@@ -1,8 +1,5 @@
 package com.tradinggym.backend.repository
 
-import com.tradinggym.backend.entity.RiskIntervention
-import com.tradinggym.backend.entity.RiskInterventionResponse
-import com.tradinggym.backend.entity.RiskInterventionType
 import com.tradinggym.backend.entity.SimulationSession
 import com.tradinggym.backend.entity.Trade
 import com.tradinggym.backend.entity.TradeOrderType
@@ -27,10 +24,9 @@ class SimulationRepositoryTests {
 	@Autowired lateinit var sessionRepository: SimulationSessionRepository
 	@Autowired lateinit var tradeRepository: TradeRepository
 	@Autowired lateinit var turnLogRepository: TurnLogRepository
-	@Autowired lateinit var interventionRepository: RiskInterventionRepository
 
 	@Test
-	fun `session, trade, intervention round-trip through the full graph`() {
+	fun `session, turn log, and trade round-trip through the full graph`() {
 		val user = userRepository.save(UserEntity(username = "sim-test-${System.nanoTime()}", passwordHash = "x"))
 
 		val session = sessionRepository.save(
@@ -81,26 +77,11 @@ class SimulationRepositoryTests {
 			),
 		)
 
-		interventionRepository.save(
-			RiskIntervention(
-				session = session,
-				trade = trade,
-				riskType = RiskInterventionType.CHASE_BUY,
-				message = "이 매매는 추격매수 패턴이에요.",
-				userResponse = RiskInterventionResponse.IGNORED,
-				simulatedTradeDate = LocalDate.of(2026, 1, 5),
-			),
-		)
-
 		val sessionId = requireNotNull(session.id)
 
 		assertEquals(1, tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId).size)
 		assertEquals("급등 뉴스 보고 따라 삼", tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId).first().reasonText)
-
-		val interventions = interventionRepository.findBySessionId(sessionId)
-		assertEquals(1, interventions.size)
-		assertEquals(RiskInterventionResponse.IGNORED, interventions.first().userResponse)
-		assertEquals(trade.id, interventions.first().trade?.id)
+		assertEquals(trade.turnLog.id, turnLog.id)
 
 		assertEquals(1, sessionRepository.findByUserIdOrderByStartedAtDesc(requireNotNull(user.id)).size)
 	}

@@ -176,18 +176,9 @@ create table trades (
   created_at timestamptz not null
 );
 
--- AI 실시간 위험 개입 로그(신용매수 경고 등) — 유저가 무시했는지/받아들였는지 기록.
-create table risk_interventions (
-  id uuid primary key default gen_random_uuid(),
-  session_id uuid not null references simulation_sessions (id),
-  trade_id uuid references trades (id),
-  risk_type varchar(255) not null
-    check (risk_type in ('EXCESSIVE_LEVERAGE', 'CONCENTRATION', 'CHASE_BUY', 'STOP_LOSS_DELAY')),
-  message text not null, -- 그 순간 보여준 경고 문구
-  user_response varchar(255) not null check (user_response in ('HEEDED', 'IGNORED')),
-  simulated_trade_date date not null,
-  created_at timestamptz not null
-);
+-- RiskInterventionModal(/simulation 신용매수 경고)은 프론트에만 있고 유저 응답을
+-- 백엔드에 기록하지 않음 — 그래서 risk_interventions 테이블은 2026-08-14에 삭제함
+-- (엔티티+레포만 있고 서비스/컨트롤러가 없던 미사용 스캐폴딩).
 
 -- ============================================================
 -- 모의투자 스탯 — 세션 완료 시점에 AI가 턴별 매매+이유(reason_text)를 전부 읽고
