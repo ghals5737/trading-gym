@@ -152,6 +152,33 @@ pymupdf 기본 텍스트 추출은 표를 **셀 텍스트의 나열**로 뱉는�
 SPEC 4-3이 "완벽한 표 복원은 요구하지 않음"이라 현 단계에서는 이 상태로 둔다.
 필요해지면 `page.find_tables()` → `to_markdown()`으로 표만 따로 뽑아 청크에 얹는 방식이 다음 후보다.
 
+## 공유 DB(RDS)로 작업할 때
+
+팀 공유 DB는 AWS RDS의 `tg` 데이터베이스다(백엔드 테이블 + `edu_*` 테이블 통합).
+**접속 정보는 절대 커밋하지 말고** 환경변수로만 넘긴다 — 이 저장소는 public이다.
+
+```bash
+export DATABASE_URL="postgresql://<user>:<password>@<rds-host>:5432/tg?sslmode=require"
+.venv/bin/python search.py "레버리지 투자의 위험성"      # 이후 모든 도구가 RDS를 본다
+```
+
+## 퀴즈 생성용 스탯 질의 (stat_rag_queries)
+
+행동 리포트의 8개 스탯(`session_stats.stat_key`)별로 "이 스탯이 약한 사용자가 배워야
+할 내용"을 서술한 검색 질의를 정의하고, 그 임베딩을 미리 계산해 `stat_rag_queries`
+테이블에 넣어둔다. **백엔드는 임베딩 모델 없이 순수 SQL로 스탯→근거 청크 검색이 가능하다.**
+
+```bash
+DATABASE_URL="..." .venv/bin/python build_stat_queries.py           # 생성 + 검증
+DATABASE_URL="..." .venv/bin/python build_stat_queries.py --verify  # 검증만
+```
+
+질의 목록은 `build_stat_queries.py` 상단 `STAT_QUERIES`에서 관리한다(수정 후 재실행하면
+멱등하게 반영). 백엔드에서 쓸 검색 SQL은 같은 파일의 독스트링에 있다.
+
+검증 결과(2026-08-16, RDS): **8개 스탯 전부 유사도 0.55 이상의 근거 청크 확보**
+(최고 RISK_MANAGEMENT_SCORE 0.73 — 금감원 실용금융 134–135쪽 레버리지 설명).
+
 ## 다음 단계와의 연결
 
 `lib/sources.py`는 메타데이터 소스를 함수로 분리해뒀다. Open API 승인 후
