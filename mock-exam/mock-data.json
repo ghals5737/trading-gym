@@ -1,0 +1,914 @@
+{
+  "profile": {
+    "riskType": "AGGRESSIVE",
+    "knowledgeLevel": "BEGINNER",
+    "infoHabit": "DEPENDENT",
+    "riskScore": 17,
+    "knowledgeScore": 4,
+    "infoHabitScore": 7,
+    "summary": "짧은 기간에 수익을 내고 싶어 하고, 투자 정보는 주로 SNS·리딩방에서 얻는 편이에요. 손실이 났을 때 더 사는 쪽을 고르는 경향이 있어 레버리지 사용에 특히 주의가 필요해요."
+  },
+  "paper": {
+    "code": "MOCK-BASIC-01",
+    "title": "첫 모의고사 · 판단의 근거 찾기",
+    "description": "차트와 그날의 뉴스만 보고 매수·매도·관망을 고르고, 왜 그렇게 판단했는지 적어보세요. 제출하면 실제 결과가 공개됩니다.",
+    "difficulty": "NORMAL",
+    "totalTurns": 5,
+    "startingCash": 10000000
+  },
+  "turns": [
+    {
+      "turnNo": 1,
+      "stockName": "종목 A",
+      "sector": "코스닥 · 2차전지 장비",
+      "asOfDate": "2021-03-15",
+      "price": 22400,
+      "holdingQty": 0,
+      "avgBuyPrice": null,
+      "chartPoints": [
+        {
+          "c": 11800,
+          "d": "2021-01-04"
+        },
+        {
+          "c": 12400,
+          "d": "2021-01-18"
+        },
+        {
+          "c": 13900,
+          "d": "2021-02-01"
+        },
+        {
+          "c": 15600,
+          "d": "2021-02-15"
+        },
+        {
+          "c": 18200,
+          "d": "2021-03-02"
+        },
+        {
+          "c": 20500,
+          "d": "2021-03-09"
+        },
+        {
+          "c": 22400,
+          "d": "2021-03-15"
+        }
+      ],
+      "news": [
+        {
+          "tag": "리딩방",
+          "title": "\"지금 못 타면 평생 후회합니다. 오늘이 마지막 기회\""
+        },
+        {
+          "tag": "커뮤니티",
+          "title": "다들 얼마 벌었어요? 여기 안 산 사람이 바보라는 분위기"
+        },
+        {
+          "tag": "뉴스",
+          "title": "대형 수주 기대감에 신고가 경신… 증권가 목표가 상향"
+        }
+      ],
+      "disclosure": {
+        "note": "판단 시점에 이미 공개돼 있던 전자공시(DART) 내용이에요.",
+        "rows": [
+          {
+            "tone": "bad",
+            "label": "최근 매출",
+            "value": "전년 대비 -34%"
+          },
+          {
+            "tone": "bad",
+            "label": "영업이익",
+            "value": "3년 연속 적자"
+          },
+          {
+            "tone": "bad",
+            "label": "전환사채(CB)",
+            "value": "300억 발행 — 잠재 매도 물량"
+          },
+          {
+            "tone": "bad",
+            "label": "최대주주 지분",
+            "value": "최근 일부 매각 공시"
+          }
+        ]
+      },
+      "outcome": {
+        "points": [
+          {
+            "c": 22400,
+            "d": "2021-03-15"
+          },
+          {
+            "c": 20600,
+            "d": "2021-04-01"
+          },
+          {
+            "c": 17100,
+            "d": "2021-04-15"
+          },
+          {
+            "c": 15800,
+            "d": "2021-05-03"
+          },
+          {
+            "c": 13100,
+            "d": "2021-06-01"
+          },
+          {
+            "c": 13000,
+            "d": "2021-06-15"
+          }
+        ],
+        "changePct": -42.0,
+        "summary": "3개월 뒤 -42%였어요. 기대감 뉴스와 달리 공시에는 이미 적자와 잠재 매도 물량이 적혀 있었습니다.",
+        "idealAction": "HOLD",
+        "idealRationale": "뉴스와 리딩방은 기대감을 말했지만 공시에는 매출 감소·연속 적자·CB 물량이 이미 있었어요. 분위기가 뜨거울수록 공시부터 확인하고, 확신이 없으면 사지 않는 것도 판단이에요.",
+        "learningPoint": "이슈에 휩쓸리지 않고 공시로 확인하기"
+      }
+    },
+    {
+      "turnNo": 2,
+      "stockName": "종목 B",
+      "sector": "코스피 · 대형 전자",
+      "asOfDate": "2020-03-23",
+      "price": 42300,
+      "holdingQty": 120,
+      "avgBuyPrice": 54000,
+      "chartPoints": [
+        {
+          "c": 55500,
+          "d": "2020-02-03"
+        },
+        {
+          "c": 57200,
+          "d": "2020-02-17"
+        },
+        {
+          "c": 54000,
+          "d": "2020-03-02"
+        },
+        {
+          "c": 47500,
+          "d": "2020-03-09"
+        },
+        {
+          "c": 42300,
+          "d": "2020-03-16"
+        },
+        {
+          "c": 36800,
+          "d": "2020-03-23"
+        }
+      ],
+      "news": [
+        {
+          "tag": "뉴스",
+          "title": "외국인 사상 최대 순매도… 서킷브레이커 발동"
+        },
+        {
+          "tag": "커뮤니티",
+          "title": "\"계좌 반토막 인증\" 공포가 극에 달한 분위기"
+        },
+        {
+          "tag": "리딩방",
+          "title": "\"지금이라도 던지세요. 반등은 없습니다\""
+        }
+      ],
+      "disclosure": {
+        "note": "주가는 급락했지만 기업의 재무 상태는 훼손되지 않은 상태였어요.",
+        "rows": [
+          {
+            "tone": "good",
+            "label": "재무구조",
+            "value": "사실상 무차입 경영"
+          },
+          {
+            "tone": "good",
+            "label": "분기 실적",
+            "value": "시장 예상치 상회"
+          },
+          {
+            "tone": "good",
+            "label": "배당",
+            "value": "전년 수준 유지 발표"
+          },
+          {
+            "tone": "good",
+            "label": "현금성 자산",
+            "value": "업종 최상위"
+          }
+        ]
+      },
+      "outcome": {
+        "points": [
+          {
+            "c": 36800,
+            "d": "2020-03-23"
+          },
+          {
+            "c": 41200,
+            "d": "2020-04-06"
+          },
+          {
+            "c": 45900,
+            "d": "2020-04-20"
+          },
+          {
+            "c": 49800,
+            "d": "2020-05-11"
+          },
+          {
+            "c": 53500,
+            "d": "2020-06-01"
+          },
+          {
+            "c": 63400,
+            "d": "2020-07-13"
+          }
+        ],
+        "changePct": 72.28,
+        "summary": "4개월 뒤 +72%였어요. 공포가 극에 달했을 때가 오히려 저점이었습니다.",
+        "idealAction": "HOLD",
+        "idealRationale": "시장 전체가 급락한 것이지 이 기업의 재무가 나빠진 게 아니었어요. 공포에 휩쓸려 파는 것이 가장 비싼 선택이 되는 전형적인 상황입니다.",
+        "learningPoint": "시장 공포와 기업 가치를 구분하기"
+      }
+    },
+    {
+      "turnNo": 3,
+      "stockName": "종목 C",
+      "sector": "코스닥 · 바이오",
+      "asOfDate": "2022-05-20",
+      "price": 8200,
+      "holdingQty": 200,
+      "avgBuyPrice": 10000,
+      "chartPoints": [
+        {
+          "c": 10000,
+          "d": "2022-03-04"
+        },
+        {
+          "c": 9700,
+          "d": "2022-03-25"
+        },
+        {
+          "c": 9200,
+          "d": "2022-04-08"
+        },
+        {
+          "c": 8900,
+          "d": "2022-04-22"
+        },
+        {
+          "c": 8500,
+          "d": "2022-05-06"
+        },
+        {
+          "c": 8200,
+          "d": "2022-05-20"
+        }
+      ],
+      "news": [
+        {
+          "tag": "커뮤니티",
+          "title": "\"평단 낮추면 금방 회복합니다\" 물타기 인증 글 다수"
+        },
+        {
+          "tag": "뉴스",
+          "title": "주요 파이프라인 임상 3상 지연 공시… 일정 불투명"
+        },
+        {
+          "tag": "리딩방",
+          "title": "\"지금이 마지막 물타기 찬스, 두 배로 담으세요\""
+        }
+      ],
+      "disclosure": {
+        "note": "손실 중일수록 공시를 다시 확인해야 판단이 흔들리지 않아요.",
+        "rows": [
+          {
+            "tone": "bad",
+            "label": "임상 일정",
+            "value": "3상 결과 발표 1년 이상 연기"
+          },
+          {
+            "tone": "bad",
+            "label": "현금 보유",
+            "value": "1년치 운영자금 미만"
+          },
+          {
+            "tone": "bad",
+            "label": "유상증자",
+            "value": "검토 중 공시"
+          },
+          {
+            "tone": "bad",
+            "label": "매출",
+            "value": "제품 매출 없음 (개발 단계)"
+          }
+        ]
+      },
+      "outcome": {
+        "points": [
+          {
+            "c": 8200,
+            "d": "2022-05-20"
+          },
+          {
+            "c": 7100,
+            "d": "2022-06-10"
+          },
+          {
+            "c": 6300,
+            "d": "2022-07-01"
+          },
+          {
+            "c": 5400,
+            "d": "2022-08-05"
+          },
+          {
+            "c": 4800,
+            "d": "2022-09-02"
+          },
+          {
+            "c": 4500,
+            "d": "2022-10-07"
+          }
+        ],
+        "changePct": -45.12,
+        "summary": "5개월 뒤 -45%였어요. 물타기를 했다면 손실이 두 배가 됐을 상황입니다.",
+        "idealAction": "SELL",
+        "idealRationale": "임상 지연·현금 부족·유상증자 검토가 겹친 상태로, 하락에 근거가 있었어요. 평단가를 낮추는 것은 손실을 줄이는 게 아니라 위험을 키우는 것입니다. 손절 기준을 미리 정해두는 게 핵심이에요.",
+        "learningPoint": "물타기의 위험과 손절 원칙 세우기"
+      }
+    },
+    {
+      "turnNo": 4,
+      "stockName": "종목 D",
+      "sector": "코스닥 · 정책 테마",
+      "asOfDate": "2023-07-26",
+      "price": 15800,
+      "holdingQty": 0,
+      "avgBuyPrice": null,
+      "chartPoints": [
+        {
+          "c": 6200,
+          "d": "2023-07-03"
+        },
+        {
+          "c": 7100,
+          "d": "2023-07-10"
+        },
+        {
+          "c": 9800,
+          "d": "2023-07-17"
+        },
+        {
+          "c": 12400,
+          "d": "2023-07-20"
+        },
+        {
+          "c": 14100,
+          "d": "2023-07-24"
+        },
+        {
+          "c": 15800,
+          "d": "2023-07-26"
+        }
+      ],
+      "news": [
+        {
+          "tag": "커뮤니티",
+          "title": "실시간 검색어 1위, \"이번 주에만 150% 올랐다\" 인증 릴레이"
+        },
+        {
+          "tag": "리딩방",
+          "title": "\"목표가 3만원, 아직 반도 안 왔습니다\""
+        },
+        {
+          "tag": "뉴스",
+          "title": "정책 수혜 기대감에 관련주 무더기 상한가… 과열 경고도"
+        }
+      ],
+      "disclosure": {
+        "note": "테마와 실제 사업의 연결고리가 얼마나 되는지 확인해야 해요.",
+        "rows": [
+          {
+            "tone": "bad",
+            "label": "해당 사업 매출",
+            "value": "전체 매출의 2% 미만"
+          },
+          {
+            "tone": "bad",
+            "label": "주가 변동",
+            "value": "3주간 +155%"
+          },
+          {
+            "tone": "bad",
+            "label": "거래정지",
+            "value": "투자경고종목 지정 예고"
+          },
+          {
+            "tone": "bad",
+            "label": "임원 보유주식",
+            "value": "최근 매도 공시"
+          }
+        ]
+      },
+      "outcome": {
+        "points": [
+          {
+            "c": 15800,
+            "d": "2023-07-26"
+          },
+          {
+            "c": 11200,
+            "d": "2023-08-02"
+          },
+          {
+            "c": 8400,
+            "d": "2023-08-16"
+          },
+          {
+            "c": 7100,
+            "d": "2023-09-01"
+          },
+          {
+            "c": 6400,
+            "d": "2023-09-20"
+          },
+          {
+            "c": 5900,
+            "d": "2023-10-11"
+          }
+        ],
+        "changePct": -62.66,
+        "summary": "3개월 뒤 -62%였어요. 테마 관련 매출은 전체의 2%도 되지 않았습니다.",
+        "idealAction": "HOLD",
+        "idealRationale": "3주 만에 155% 오른 뒤 남들이 다 산다는 이유로 들어가는 건 가장 늦게 타는 자리예요. 테마와 실제 매출의 연결고리를 확인하면 과열 여부가 보입니다.",
+        "learningPoint": "군중심리와 테마주 과열 구분하기"
+      }
+    },
+    {
+      "turnNo": 5,
+      "stockName": "종목 E",
+      "sector": "코스피 · 음식료",
+      "asOfDate": "2019-10-24",
+      "price": 7700,
+      "holdingQty": 0,
+      "avgBuyPrice": null,
+      "chartPoints": [
+        {
+          "c": 9600,
+          "d": "2019-08-01"
+        },
+        {
+          "c": 9100,
+          "d": "2019-08-22"
+        },
+        {
+          "c": 8600,
+          "d": "2019-09-05"
+        },
+        {
+          "c": 8300,
+          "d": "2019-09-19"
+        },
+        {
+          "c": 7900,
+          "d": "2019-10-10"
+        },
+        {
+          "c": 7700,
+          "d": "2019-10-24"
+        }
+      ],
+      "news": [
+        {
+          "tag": "커뮤니티",
+          "title": "\"이 종목은 끝났다\" 손절 인증 글이 줄줄이"
+        },
+        {
+          "tag": "뉴스",
+          "title": "원자재 가격 급등 우려에 업종 전반 약세 지속"
+        },
+        {
+          "tag": "리딩방",
+          "title": "\"지금이라도 던지세요. 반등은 없습니다\""
+        }
+      ],
+      "disclosure": {
+        "note": "분위기와 숫자가 정반대인 경우예요. 공시를 열어봐야 보입니다.",
+        "rows": [
+          {
+            "tone": "good",
+            "label": "최근 매출",
+            "value": "전년 대비 +18%"
+          },
+          {
+            "tone": "good",
+            "label": "영업이익률",
+            "value": "2분기 연속 개선"
+          },
+          {
+            "tone": "good",
+            "label": "부채",
+            "value": "사실상 무차입 경영"
+          },
+          {
+            "tone": "good",
+            "label": "자사주",
+            "value": "매입 계획 공시"
+          }
+        ]
+      },
+      "outcome": {
+        "points": [
+          {
+            "c": 7700,
+            "d": "2019-10-24"
+          },
+          {
+            "c": 8200,
+            "d": "2019-11-14"
+          },
+          {
+            "c": 8900,
+            "d": "2019-12-05"
+          },
+          {
+            "c": 9600,
+            "d": "2020-01-09"
+          },
+          {
+            "c": 10300,
+            "d": "2020-02-06"
+          },
+          {
+            "c": 10500,
+            "d": "2020-04-23"
+          }
+        ],
+        "changePct": 36.36,
+        "summary": "6개월 뒤 +36%였어요. 분위기는 최악이었지만 실적과 재무는 오히려 좋아지고 있었습니다.",
+        "idealAction": "BUY",
+        "idealRationale": "커뮤니티와 리딩방은 끝났다고 했지만 공시 속 매출·이익률·자사주 매입은 정반대를 가리켰어요. 남들이 공포에 팔 때 숫자를 확인한 사람이 기회를 잡습니다.",
+        "learningPoint": "분위기가 아니라 숫자로 판단하기"
+      }
+    }
+  ],
+  "attempt": {
+    "status": "COMPLETED",
+    "finalReturnPct": -31.4,
+    "alignedCount": 1,
+    "responses": [
+      {
+        "turnNo": 1,
+        "action": "BUY",
+        "quantity": 200,
+        "reasonMemo": "리딩방에서 오늘이 마지막 기회라고 해서 샀어요. 차트도 계속 우상향이고 다들 수익 인증하는 거 보니까 안 사면 나만 뒤처질 것 같았습니다.",
+        "viewedDisclosure": false,
+        "secondsSpent": 34,
+        "isAligned": false
+      },
+      {
+        "turnNo": 2,
+        "action": "SELL",
+        "quantity": 120,
+        "reasonMemo": "너무 무서워서 다 팔았어요. 뉴스에서 서킷브레이커 얘기 나오고 커뮤니티에도 반토막 인증만 올라와서 더 떨어질 것 같았습니다. 일단 지키고 봐야죠.",
+        "viewedDisclosure": false,
+        "secondsSpent": 21,
+        "isAligned": false
+      },
+      {
+        "turnNo": 3,
+        "action": "BUY",
+        "quantity": 200,
+        "reasonMemo": "평단가를 낮추려고 추가매수 했습니다. 여기서 팔면 손실이 확정되니까 버티는 게 낫다고 생각했어요. 바이오는 원래 임상 뜨면 한 번에 오르잖아요.",
+        "viewedDisclosure": false,
+        "secondsSpent": 47,
+        "isAligned": false
+      },
+      {
+        "turnNo": 4,
+        "action": "BUY",
+        "quantity": 300,
+        "reasonMemo": "실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까 더 갈 것 같아서 일단 탔습니다.",
+        "viewedDisclosure": false,
+        "secondsSpent": 12,
+        "isAligned": false
+      },
+      {
+        "turnNo": 5,
+        "action": "BUY",
+        "quantity": 150,
+        "reasonMemo": "공시 열어보니까 매출도 늘고 자사주도 산다고 해서 분위기랑 실제 숫자가 다른 것 같았습니다. 그래서 조금만 사봤어요.",
+        "viewedDisclosure": true,
+        "secondsSpent": 96,
+        "isAligned": true
+      }
+    ]
+  },
+  "diagnoses": [
+    {
+      "patternKey": "HERD_FOLLOWING",
+      "severity": "HIGH",
+      "hitCount": 3,
+      "evidence": [
+        {
+          "memo": "리딩방에서 오늘이 마지막 기회라고 해서 샀어요. 차트도 계속 우상향이고 다들 수익 인증하는 거 보니까 안 사면 나만 뒤처질 것 같았습니다.",
+          "action": "BUY",
+          "matched": [
+            "다들",
+            "뒤처",
+            "인증"
+          ],
+          "turn_no": 1,
+          "was_wrong": true,
+          "stock_name": "종목 A",
+          "outcome_change_pct": -42.0
+        },
+        {
+          "memo": "실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까 더 갈 것 같아서 일단 탔습니다.",
+          "action": "BUY",
+          "matched": [
+            "다들",
+            "분위기",
+            "1위"
+          ],
+          "turn_no": 4,
+          "was_wrong": true,
+          "stock_name": "종목 D",
+          "outcome_change_pct": -62.66
+        },
+        {
+          "memo": "공시 열어보니까 매출도 늘고 자사주도 산다고 해서 분위기랑 실제 숫자가 다른 것 같았습니다. 그래서 조금만 사봤어요.",
+          "action": "BUY",
+          "matched": [
+            "분위기"
+          ],
+          "turn_no": 5,
+          "was_wrong": false,
+          "stock_name": "종목 E",
+          "outcome_change_pct": 36.36
+        }
+      ],
+      "ragQuery": "군중심리에 휩쓸린 투자와 과열된 테마주의 위험"
+    },
+    {
+      "patternKey": "DISCLOSURE_IGNORED",
+      "severity": "HIGH",
+      "hitCount": 3,
+      "evidence": [
+        {
+          "memo": "리딩방에서 오늘이 마지막 기회라고 해서 샀어요. 차트도 계속 우상향이고 다들 수익 인증하는 거 보니까 안 사면 나만 뒤처질 것 같았습니다.",
+          "action": "BUY",
+          "matched": [
+            "공시 미확인"
+          ],
+          "turn_no": 1,
+          "was_wrong": true,
+          "stock_name": "종목 A",
+          "outcome_change_pct": -42.0
+        },
+        {
+          "memo": "평단가를 낮추려고 추가매수 했습니다. 여기서 팔면 손실이 확정되니까 버티는 게 낫다고 생각했어요. 바이오는 원래 임상 뜨면 한 번에 오르잖아요.",
+          "action": "BUY",
+          "matched": [
+            "공시 미확인"
+          ],
+          "turn_no": 3,
+          "was_wrong": true,
+          "stock_name": "종목 C",
+          "outcome_change_pct": -45.12
+        },
+        {
+          "memo": "실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까 더 갈 것 같아서 일단 탔습니다.",
+          "action": "BUY",
+          "matched": [
+            "공시 미확인"
+          ],
+          "turn_no": 4,
+          "was_wrong": true,
+          "stock_name": "종목 D",
+          "outcome_change_pct": -62.66
+        }
+      ],
+      "ragQuery": "재무제표와 공시를 확인하고 투자를 결정하는 방법"
+    },
+    {
+      "patternKey": "NEWS_CHASING",
+      "severity": "HIGH",
+      "hitCount": 2,
+      "evidence": [
+        {
+          "memo": "리딩방에서 오늘이 마지막 기회라고 해서 샀어요. 차트도 계속 우상향이고 다들 수익 인증하는 거 보니까 안 사면 나만 뒤처질 것 같았습니다.",
+          "action": "BUY",
+          "matched": [
+            "리딩방",
+            "마지막 기회"
+          ],
+          "turn_no": 1,
+          "was_wrong": true,
+          "stock_name": "종목 A",
+          "outcome_change_pct": -42.0
+        },
+        {
+          "memo": "실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까 더 갈 것 같아서 일단 탔습니다.",
+          "action": "BUY",
+          "matched": [
+            "실검",
+            "수혜주"
+          ],
+          "turn_no": 4,
+          "was_wrong": true,
+          "stock_name": "종목 D",
+          "outcome_change_pct": -62.66
+        }
+      ],
+      "ragQuery": "투자 정보를 검증하지 않고 추천만 믿고 매수하는 위험"
+    },
+    {
+      "patternKey": "PANIC_SELL",
+      "severity": "MEDIUM",
+      "hitCount": 1,
+      "evidence": [
+        {
+          "memo": "너무 무서워서 다 팔았어요. 뉴스에서 서킷브레이커 얘기 나오고 커뮤니티에도 반토막 인증만 올라와서 더 떨어질 것 같았습니다. 일단 지키고 봐야죠.",
+          "action": "SELL",
+          "matched": [
+            "무서",
+            "더 떨어질"
+          ],
+          "turn_no": 2,
+          "was_wrong": true,
+          "stock_name": "종목 B",
+          "outcome_change_pct": 72.28
+        }
+      ],
+      "ragQuery": "시장이 급락할 때 공포에 파는 투자자의 심리와 대응"
+    },
+    {
+      "patternKey": "LOSS_AVERSION",
+      "severity": "MEDIUM",
+      "hitCount": 1,
+      "evidence": [
+        {
+          "memo": "평단가를 낮추려고 추가매수 했습니다. 여기서 팔면 손실이 확정되니까 버티는 게 낫다고 생각했어요. 바이오는 원래 임상 뜨면 한 번에 오르잖아요.",
+          "action": "BUY",
+          "matched": [
+            "평단",
+            "추가매수",
+            "버티",
+            "손실이 확정"
+          ],
+          "turn_no": 3,
+          "was_wrong": true,
+          "stock_name": "종목 C",
+          "outcome_change_pct": -45.12
+        }
+      ],
+      "ragQuery": "손실이 났을 때 손절매 기준을 세우고 물타기를 피하는 방법"
+    },
+    {
+      "patternKey": "NO_RATIONALE",
+      "severity": "MEDIUM",
+      "hitCount": 1,
+      "evidence": [
+        {
+          "memo": "실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까 더 갈 것 같아서 일단 탔습니다.",
+          "action": "BUY",
+          "matched": [
+            "느낌",
+            "그냥"
+          ],
+          "turn_no": 4,
+          "was_wrong": true,
+          "stock_name": "종목 D",
+          "outcome_change_pct": -62.66
+        }
+      ],
+      "ragQuery": "투자 판단의 기준을 세우고 계획적으로 투자하는 방법"
+    }
+  ],
+  "quizSet": {
+    "headline": "남들 따라 사기(군중심리) 습관이 3번 보였어요",
+    "generator": "stub",
+    "questions": [
+      {
+        "position": 0,
+        "patternKey": "HERD_FOLLOWING",
+        "question": "단기간에 급등한 테마주에서 \"다들 사고 있다\"는 이유로 매수할 때 가장 큰 위험은?",
+        "explanation": "테마 관련 매출이 전체의 일부에 불과한 경우가 많습니다. 기대감만으로 오른 가격은 기대가 사라지면 근거 없이 무너집니다.",
+        "whyThisQuestion": "4턴에서 \"실검 1위에 다들 사는 분위기라 그냥 느낌이 좋았어요. 정책 수혜주라니까…\"라고 적으셨어요. 그 판단의 근거를 다시 살펴보는 문제예요.",
+        "relatedTurnNo": 4,
+        "source": {
+          "chunkId": 9398,
+          "title": "대학생을 위한 실용금융 (제4판)",
+          "orgName": "금융감독원",
+          "pageStart": 543,
+          "pageEnd": 544,
+          "score": 0.5505
+        },
+        "options": [
+          {
+            "position": 0,
+            "label": "거래량이 줄어 매도가 어려워진다",
+            "isCorrect": false
+          },
+          {
+            "position": 1,
+            "label": "테마와 실제 사업·매출의 연결고리가 약해 기대가 꺼지면 급락한다",
+            "isCorrect": true
+          },
+          {
+            "position": 2,
+            "label": "배당을 받지 못한다",
+            "isCorrect": false
+          },
+          {
+            "position": 3,
+            "label": "증권사 수수료가 더 비싸진다",
+            "isCorrect": false
+          }
+        ]
+      },
+      {
+        "position": 1,
+        "patternKey": "DISCLOSURE_IGNORED",
+        "question": "매수 전에 전자공시(DART)에서 확인해야 할 항목으로 가장 거리가 먼 것은?",
+        "explanation": "공시는 기업의 실제 상태를 담은 1차 자료입니다. 검색어 순위는 분위기일 뿐 기업 가치와 무관해요.",
+        "whyThisQuestion": "3턴에서 \"평단가를 낮추려고 추가매수 했습니다. 여기서 팔면 손실이 확정되니까 버티…\"라고 적으셨어요. 그 판단의 근거를 다시 살펴보는 문제예요.",
+        "relatedTurnNo": 3,
+        "source": {
+          "chunkId": 8734,
+          "title": "대학생을 위한 실용금융 (제4판)",
+          "orgName": "금융감독원",
+          "pageStart": 159,
+          "pageEnd": 160,
+          "score": 0.696
+        },
+        "options": [
+          {
+            "position": 0,
+            "label": "최근 매출과 영업이익 추이",
+            "isCorrect": false
+          },
+          {
+            "position": 1,
+            "label": "전환사채(CB) 등 잠재적 매도 물량",
+            "isCorrect": false
+          },
+          {
+            "position": 2,
+            "label": "최대주주·임원의 지분 매각 여부",
+            "isCorrect": false
+          },
+          {
+            "position": 3,
+            "label": "해당 종목의 오늘 실시간 검색어 순위",
+            "isCorrect": true
+          }
+        ]
+      },
+      {
+        "position": 2,
+        "patternKey": "NEWS_CHASING",
+        "question": "리딩방이나 뉴스에서 \"지금이 마지막 기회\"라는 말을 들었을 때, 가장 먼저 해야 할 일은?",
+        "explanation": "추천의 강도와 근거의 강도는 다릅니다. 급하게 결정하도록 압박하는 정보일수록 공시·재무 같은 1차 자료로 확인해야 해요.",
+        "whyThisQuestion": "1턴에서 \"리딩방에서 오늘이 마지막 기회라고 해서 샀어요. 차트도 계속 우상향이고…\"라고 적으셨어요. 그 판단의 근거를 다시 살펴보는 문제예요.",
+        "relatedTurnNo": 1,
+        "source": {
+          "chunkId": 8754,
+          "title": "대학생을 위한 실용금융 (제4판)",
+          "orgName": "금융감독원",
+          "pageStart": 169,
+          "pageEnd": 170,
+          "score": 0.5879
+        },
+        "options": [
+          {
+            "position": 0,
+            "label": "남들보다 늦기 전에 일단 소액이라도 매수한다",
+            "isCorrect": false
+          },
+          {
+            "position": 1,
+            "label": "기업의 공시와 재무제표를 직접 확인해 그 주장에 근거가 있는지 본다",
+            "isCorrect": true
+          },
+          {
+            "position": 2,
+            "label": "차트가 우상향인지만 확인하고 판단한다",
+            "isCorrect": false
+          },
+          {
+            "position": 3,
+            "label": "커뮤니티에서 다른 사람들의 반응을 더 찾아본다",
+            "isCorrect": false
+          }
+        ]
+      }
+    ]
+  }
+}
