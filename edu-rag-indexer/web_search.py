@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import psycopg
 
 from lib import store
 from lib.embedding import get_embedder
@@ -107,6 +110,28 @@ class Handler(BaseHTTPRequestHandler):
     embedder = None
     conn = None
     chunk_count = 0
+    database_url = None
+    # ThreadingHTTPServer는 요청마다 스레드를 만드는데 psycopg 커넥션은 동시 사용이 안 된다
+    # ("another command is already in progress"로 깨짐 — 실제로 겪음). 검색 QPS가 낮으니
+    # 커넥션 풀 대신 락 하나로 직렬화하고, 죽은 커넥션(RDS 유휴 끊김 등)은 재접속한다.
+    db_lock = threading.Lock()
+
+    @classmethod
+    def db_search(cls, query_vector, top_k, tags=None, target=None):
+        with cls.db_lock:
+            for attempt in (1, 2):
+                try:
+                    return store.search(cls.conn, query_vector, top_k=top_k, tags=tags, target=target)
+                except psycopg.OperationalError as exc:
+                    if attempt == 2:
+                        raise
+                    print("  ! DB 커넥션 재접속 (%s)" % str(exc).splitlines()[0])
+                    try:
+                        cls.conn.close()
+                    except Exception:
+                        pass
+                    cls.conn = store.connect(cls.database_url)
+                    cls.conn.autocommit = True
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -128,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
 
         start = time.time()
         query_vector = self.embedder.encode([query])[0]
-        results = store.search(self.conn, query_vector, top_k=top_k, tags=tags, target=target)
+        results = self.db_search(query_vector, top_k=top_k, tags=tags, target=target)
         elapsed_ms = (time.time() - start) * 1000
 
         payload = {
@@ -165,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         if query:
             start = time.time()
             query_vector = self.embedder.encode([query])[0]
-            results = store.search(self.conn, query_vector, top_k=5)
+            results = self.db_search(query_vector, top_k=5)
             elapsed_ms = (time.time() - start) * 1000
 
         body = PAGE_TEMPLATE.format(
@@ -188,6 +213,7 @@ def main():
     print("설정 로드 중...")
     settings = load_settings()
     conn = store.connect(settings.database_url)
+    conn.autocommit = True  # 읽기 전용 서버 — 트랜잭션을 열어두면 유휴 끊김 시 복구가 안 됨
     totals = store.stats(conn)
     print(f"DB 연결됨 — 문서 {totals['documents']}개, 청크 {totals['chunks']}개")
 
@@ -198,6 +224,7 @@ def main():
     Handler.embedder = embedder
     Handler.conn = conn
     Handler.chunk_count = totals["chunks"]
+    Handler.database_url = settings.database_url
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"\n검색 서버 실행 중: http://localhost:{PORT}\n(Ctrl+C로 종료)")
