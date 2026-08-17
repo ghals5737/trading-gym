@@ -1,66 +1,34 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
-import ExamChart, { type ChartPoint } from '../../components/ExamChart';
-import { diagnose, type Diagnosis, type ExamAction } from '../../lib/exam-diagnose';
-import mock from '../../lib/exam-mock-data.json';
+import ExamChart from '../../components/ExamChart';
+import useLoggedIn from '../../components/useLoggedIn';
+import {
+  answerExamQuiz,
+  generateExamQuiz,
+  getActiveExam,
+  getExamQuiz,
+  getExamReport,
+  getExamTurn,
+  getMyInvestorProfileSafe,
+  startExam,
+  submitTurn,
+  type Diagnosis,
+  type ExamAction,
+  type ExamAttempt,
+  type ExamReport,
+  type ExamTurn,
+  type ExamTurnOutcome,
+  type QuizSet,
+} from '../../lib/exam-api';
 
-// 백엔드 API가 붙기 전까지는 mock-exam/export_mock.py가 만든 JSON을 그대로 쓴다.
-// 응답·진단은 사용자가 이 화면에서 실제로 고른 것으로 계산하고, 퀴즈는 미리 생성해둔
-// 문항 은행에서 진단된 패턴에 맞는 것을 고른다(LLM 호출은 서버 몫이라 여기선 불가).
+// 모의고사 화면. 진단·퀴즈 생성은 전부 백엔드(/api/exam)가 하고, 여기서는 단계 전환과
+// 입력만 담당한다. 예전엔 목업 JSON + 프론트 진단이었는데, 규칙이 두 곳에 있으면
+// 어긋나기 때문에 API 연결과 함께 서버로 넘겼다.
 
-interface NewsItem {
-  tag: string;
-  title: string;
-}
-interface DisclosureRow {
-  label: string;
-  value: string;
-  tone: string;
-}
-interface Turn {
-  turnNo: number;
-  stockName: string;
-  sector: string;
-  asOfDate: string;
-  price: number;
-  holdingQty: number;
-  avgBuyPrice: number | null;
-  chartPoints: ChartPoint[];
-  news: NewsItem[];
-  disclosure: { rows: DisclosureRow[]; note: string } | null;
-  outcome: {
-    points: ChartPoint[];
-    changePct: number;
-    summary: string;
-    idealAction: ExamAction;
-    idealRationale: string;
-    learningPoint: string;
-  };
-}
-interface QuizQuestion {
-  position: number;
-  patternKey: string;
-  question: string;
-  explanation: string;
-  whyThisQuestion: string | null;
-  relatedTurnNo: number | null;
-  source: {
-    title: string;
-    orgName: string;
-    pageStart: number;
-    pageEnd: number;
-    score: number | null;
-  };
-  options: { position: number; label: string; isCorrect: boolean }[];
-}
-
-const TURNS = mock.turns as unknown as Turn[];
-const QUESTIONS = (mock.quizSet?.questions ?? []) as unknown as QuizQuestion[];
-const PAPER = mock.paper;
-const PROFILE = mock.profile;
+type Step = 'intro' | 'turn' | 'result' | 'report' | 'quiz';
 
 const ACTIONS: { key: ExamAction; label: string; hint: string }[] = [
   { key: 'BUY', label: '매수', hint: '지금 산다' },
@@ -92,117 +60,228 @@ const INFO_LABEL: Record<string, string> = {
   DEPENDENT: '추천 의존형',
 };
 
+// 서버도 같은 값으로 검증한다(ExamService.minMemoLength) — 여기서 먼저 막아 왕복을 아낀다.
 const MIN_MEMO = 10;
-
-interface Answer {
-  turnNo: number;
-  action: ExamAction;
-  reasonMemo: string;
-  viewedDisclosure: boolean;
-}
 
 const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 
-export default function RewindClient() {
-  const [step, setStep] = useState<'intro' | 'turn' | 'result' | 'report' | 'quiz'>('intro');
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>([]);
+interface ProfileSummary {
+  riskType: string;
+  knowledgeLevel: string;
+  infoHabit: string;
+  explanationText: string | null;
+}
 
-  // 현재 턴 입력 상태
+export default function RewindClient() {
+  const loggedIn = useLoggedIn();
+
+  const [step, setStep] = useState<Step>('intro');
+  const [attempt, setAttempt] = useState<ExamAttempt | null>(null);
+  const [turn, setTurn] = useState<ExamTurn | null>(null);
+  const [outcome, setOutcome] = useState<ExamTurnOutcome | null>(null);
+  const [report, setReport] = useState<ExamReport | null>(null);
+  const [quizSet, setQuizSet] = useState<QuizSet | null>(null);
+  const [profile, setProfile] = useState<ProfileSummary | null>(null);
+
+  const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // 현재 턴 입력
   const [action, setAction] = useState<ExamAction | null>(null);
   const [memo, setMemo] = useState('');
   const [disclosureOpen, setDisclosureOpen] = useState(false);
   const [viewedDisclosure, setViewedDisclosure] = useState(false);
 
-  const [quizPicks, setQuizPicks] = useState<Record<number, number>>({});
+  const run = useCallback(async <T,>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+    setBusy(true);
+    setBusyLabel(label);
+    setError(null);
+    try {
+      return await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '요청이 실패했어요');
+      return null;
+    } finally {
+      setBusy(false);
+      setBusyLabel('');
+    }
+  }, []);
 
-  const turn = TURNS[index];
-  const isLast = index === TURNS.length - 1;
-
-  const resetTurnState = () => {
+  const resetTurnInput = () => {
     setAction(null);
     setMemo('');
     setDisclosureOpen(false);
     setViewedDisclosure(false);
   };
 
-  const submitTurn = () => {
-    if (!action || memo.trim().length < MIN_MEMO) return;
-    setAnswers((prev) => [
-      ...prev,
-      { turnNo: turn.turnNo, action, reasonMemo: memo.trim(), viewedDisclosure },
-    ]);
-    setStep('result');
-  };
+  // 로그인 후 진행 중인 응시가 있으면 이어서 풀게 한다(새로고침 대비).
+  useEffect(() => {
+    if (!loggedIn) return;
+    let cancelled = false;
+    (async () => {
+      const [active, myProfile] = await Promise.all([
+        getActiveExam().catch(() => null),
+        getMyInvestorProfileSafe(),
+      ]);
+      if (cancelled) return;
+      if (myProfile) setProfile(myProfile);
+      if (active?.currentTurn) {
+        setAttempt(active);
+        setTurn(active.currentTurn);
+        setStep('turn');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loggedIn]);
 
-  const nextTurn = () => {
-    if (isLast) {
-      setStep('report');
-      return;
-    }
-    setIndex((i) => i + 1);
-    resetTurnState();
+  const onStart = async () => {
+    const started = await run('모의고사를 준비하는 중', () => startExam());
+    if (!started) return;
+    setAttempt(started);
+    setTurn(started.currentTurn);
+    resetTurnInput();
     setStep('turn');
   };
 
-  // 사용자가 실제로 고른 답으로 진단 — 미리 계산된 결과가 아니다.
-  const diagnoses: Diagnosis[] = useMemo(() => {
-    if (answers.length === 0) return [];
-    return diagnose(
-      answers.map((a) => {
-        const t = TURNS.find((x) => x.turnNo === a.turnNo)!;
-        return {
-          turnNo: a.turnNo,
-          stockName: t.stockName,
-          action: a.action,
-          reasonMemo: a.reasonMemo,
-          viewedDisclosure: a.viewedDisclosure,
-          isAligned: a.action === t.outcome.idealAction,
-          outcomeChangePct: t.outcome.changePct,
-        };
+  const onSubmitTurn = async () => {
+    if (!attempt || !action || memo.trim().length < MIN_MEMO) return;
+    const result = await run('결과를 확인하는 중', () =>
+      submitTurn(attempt.attemptId, {
+        action,
+        reasonMemo: memo.trim(),
+        viewedDisclosure,
       }),
     );
-  }, [answers]);
+    if (!result) return;
+    setOutcome(result);
+    setStep('result');
+  };
 
-  // 진단된 패턴에 해당하는 문항만 골라 최대 3개 — 심각한 순서 그대로.
-  const quiz: QuizQuestion[] = useMemo(() => {
-    const keys = diagnoses.map((d) => d.patternKey);
-    return keys
-      .map((k) => QUESTIONS.find((q) => q.patternKey === k))
-      .filter((q): q is QuizQuestion => Boolean(q))
-      .slice(0, 3);
-  }, [diagnoses]);
+  const onNext = async () => {
+    if (!attempt || !outcome) return;
+    if (outcome.completed) {
+      const built = await run('메모를 분석하는 중', () => getExamReport(attempt.attemptId));
+      if (!built) return;
+      setReport(built);
+      setStep('report');
+      return;
+    }
+    const next = await run('다음 문제를 가져오는 중', () =>
+      getExamTurn(attempt.attemptId, outcome.nextTurnNo!),
+    );
+    if (!next) return;
+    setTurn(next);
+    setOutcome(null);
+    resetTurnInput();
+    setStep('turn');
+  };
 
-  const alignedCount = answers.filter((a) => {
-    const t = TURNS.find((x) => x.turnNo === a.turnNo)!;
-    return a.action === t.outcome.idealAction;
-  }).length;
+  const onGenerateQuiz = async () => {
+    if (!attempt) return;
+    // 이미 만들어둔 세트가 있으면 재사용 — LLM 호출을 아낀다.
+    const existing = await getExamQuiz(attempt.attemptId).catch(() => null);
+    if (existing) {
+      setQuizSet(existing);
+      setStep('quiz');
+      return;
+    }
+    const generated = await run('맞춤 문제를 만드는 중 (10초쯤 걸려요)', () =>
+      generateExamQuiz(attempt.attemptId),
+    );
+    if (!generated) return;
+    setQuizSet(generated);
+    setStep('quiz');
+  };
 
-  // ─────────────────────────────────────────── 시작 화면
+  const onAnswerQuiz = async (questionId: string, optionId: string) => {
+    const result = await run('채점하는 중', () => answerExamQuiz(questionId, optionId));
+    if (!result || !quizSet) return;
+    setQuizSet({
+      ...quizSet,
+      questions: quizSet.questions.map((q) =>
+        q.id === questionId
+          ? {
+              ...q,
+              answered: true,
+              answeredOptionId: optionId,
+              correctOptionId: result.correctOptionId,
+              correct: result.correct,
+              explanation: result.explanation,
+              whyThisQuestion: result.whyThisQuestion,
+            }
+          : q,
+      ),
+    });
+  };
+
+  // ─────────────────────────────────────────── 공통 조각
+  const banner = (
+    <>
+      {busy && (
+        <div className="card" style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span className="pill">진행 중</span>
+          <span style={{ fontSize: 14, color: 'var(--soft)' }}>{busyLabel}…</span>
+        </div>
+      )}
+      {error && (
+        <div
+          className="card"
+          style={{ marginTop: 12, background: 'var(--red-chip)', border: '1px solid var(--red)' }}
+        >
+          <span style={{ fontSize: 14, color: 'var(--red)' }}>{error}</span>
+        </div>
+      )}
+    </>
+  );
+
+  if (!loggedIn) {
+    return (
+      <div>
+        <TopNav right="모의고사" />
+        <div className="page-narrow" style={{ alignItems: 'center', textAlign: 'center' }}>
+          <div className="eyebrow" style={{ justifyContent: 'center' }}>리와인드 · 모의고사</div>
+          <h1 style={{ fontSize: 26 }}>로그인하면 모의고사를 풀 수 있어요</h1>
+          <p className="lede">
+            판단과 메모를 기록해 습관을 진단하기 때문에 로그인이 필요해요. (데모 계정: demo / demo)
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────── 시작
   if (step === 'intro') {
     return (
       <div>
         <TopNav right="모의고사" />
         <div className="page-narrow">
           <div className="eyebrow">리와인드 · 모의고사</div>
-          <h1 style={{ fontSize: 28, marginBottom: 8 }}>{PAPER.title}</h1>
-          <p className="lede">{PAPER.description}</p>
+          <h1 style={{ fontSize: 28, marginBottom: 8 }}>과거 시장에서 판단을 연습해요</h1>
+          <p className="lede">
+            차트와 그날의 뉴스만 보고 매수·매도·관망을 고르고, 왜 그렇게 판단했는지 적어보세요.
+            제출하면 실제 결과가 공개됩니다.
+          </p>
 
-          {PROFILE && (
+          {profile && (
             <div className="card" style={{ marginTop: 20 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>
                 내 투자성향 (온보딩 결과)
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <span className="pill">{RISK_LABEL[PROFILE.riskType] ?? PROFILE.riskType}</span>
+                <span className="pill">{RISK_LABEL[profile.riskType] ?? profile.riskType}</span>
                 <span className="pill">
-                  지식 {KNOWLEDGE_LABEL[PROFILE.knowledgeLevel] ?? PROFILE.knowledgeLevel}
+                  지식 {KNOWLEDGE_LABEL[profile.knowledgeLevel] ?? profile.knowledgeLevel}
                 </span>
-                <span className="pill">{INFO_LABEL[PROFILE.infoHabit] ?? PROFILE.infoHabit}</span>
+                <span className="pill">{INFO_LABEL[profile.infoHabit] ?? profile.infoHabit}</span>
               </div>
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65, color: 'var(--soft)' }}>
-                {PROFILE.summary}
-              </p>
+              {profile.explanationText && (
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65, color: 'var(--soft)' }}>
+                  {profile.explanationText}
+                </p>
+              )}
             </div>
           )}
 
@@ -214,13 +293,15 @@ export default function RewindClient() {
               <li>차트와 그날의 뉴스를 봅니다 (공시는 직접 열어봐야 보여요)</li>
               <li><strong style={{ color: 'var(--ink)' }}>매수 · 관망 · 매도</strong> 중 하나를 고르고,</li>
               <li><strong style={{ color: 'var(--ink)' }}>왜 그렇게 판단했는지 메모</strong>를 남깁니다</li>
-              <li>제출하면 실제로 어떻게 됐는지 공개돼요 ({PAPER.totalTurns}턴 반복)</li>
+              <li>제출하면 실제로 어떻게 됐는지 공개돼요</li>
               <li>끝나면 메모를 분석해 습관을 진단하고, 맞춤 문제를 드려요</li>
             </ol>
           </div>
 
+          {banner}
+
           <div className="cta-row" style={{ marginTop: 20 }}>
-            <button type="button" className="btn btn-primary" onClick={() => setStep('turn')}>
+            <button type="button" className="btn btn-primary" onClick={onStart} disabled={busy}>
               모의고사 시작하기
             </button>
           </div>
@@ -230,27 +311,27 @@ export default function RewindClient() {
   }
 
   // ─────────────────────────────────────────── 진단 리포트
-  if (step === 'report') {
+  if (step === 'report' && report) {
     return (
       <div>
         <TopNav right="진단 리포트" />
         <div className="page-narrow">
           <div className="eyebrow">모의고사 결과</div>
           <h1 style={{ fontSize: 26, marginBottom: 6 }}>
-            {TURNS.length}턴 중 {alignedCount}턴을 모범답안과 같게 판단했어요
+            {report.totalTurns}턴 중 {report.alignedCount}턴을 모범답안과 같게 판단했어요
           </h1>
           <p className="lede">
             아래 진단은 <strong>직접 적으신 메모</strong>에서 뽑은 거예요. 어떤 표현이 근거가 됐는지 같이 보여드릴게요.
           </p>
 
-          {diagnoses.length === 0 ? (
+          {report.diagnoses.length === 0 ? (
             <div className="card" style={{ marginTop: 16 }}>
               <p style={{ margin: 0, fontSize: 14, color: 'var(--soft)' }}>
                 눈에 띄는 위험 습관이 잡히지 않았어요. 메모에 판단 근거를 구체적으로 적을수록 진단이 정확해져요.
               </p>
             </div>
           ) : (
-            diagnoses.map((d) => (
+            report.diagnoses.map((d: Diagnosis) => (
               <div key={d.patternKey} className="card" style={{ marginTop: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                   <span
@@ -268,12 +349,7 @@ export default function RewindClient() {
                 {d.evidence.slice(0, 2).map((e) => (
                   <div
                     key={`${d.patternKey}-${e.turnNo}`}
-                    style={{
-                      background: 'var(--bg)',
-                      borderRadius: 10,
-                      padding: '10px 12px',
-                      marginBottom: 6,
-                    }}
+                    style={{ background: 'var(--bg)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}
                   >
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
                       {e.turnNo}턴 {e.stockName} · {ACTION_LABEL[e.action]}
@@ -288,14 +364,16 @@ export default function RewindClient() {
             ))
           )}
 
+          {banner}
+
           <div className="cta-row" style={{ marginTop: 20 }}>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setStep('quiz')}
-              disabled={quiz.length === 0}
+              onClick={onGenerateQuiz}
+              disabled={busy || report.diagnoses.length === 0}
             >
-              맞춤 문제 {quiz.length}개 풀어보기
+              맞춤 문제 풀어보기
             </button>
           </div>
         </div>
@@ -304,109 +382,105 @@ export default function RewindClient() {
   }
 
   // ─────────────────────────────────────────── 맞춤 퀴즈
-  if (step === 'quiz') {
+  if (step === 'quiz' && quizSet) {
     return (
       <div>
         <TopNav right="맞춤 문제" />
         <div className="page-narrow">
           <div className="eyebrow">내 메모에서 만든 문제</div>
-          <h1 style={{ fontSize: 26, marginBottom: 6 }}>
-            {mock.quizSet?.headline ?? '맞춤 문제'}
-          </h1>
-          <p className="lede">
-            문제마다 어떤 자료 몇 쪽을 근거로 만들었는지 함께 표시돼요.
-          </p>
+          <h1 style={{ fontSize: 26, marginBottom: 6 }}>{quizSet.headline ?? '맞춤 문제'}</h1>
+          <p className="lede">문제마다 어떤 자료 몇 쪽을 근거로 만들었는지 함께 표시돼요.</p>
 
-          {quiz.map((q, qi) => {
-            const picked = quizPicks[qi];
-            const answered = picked !== undefined;
-            const correct = q.options.find((o) => o.isCorrect);
-            return (
-              <div key={q.patternKey} className="card" style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-                  Q{qi + 1}
-                  {q.relatedTurnNo ? ` · ${q.relatedTurnNo}턴 판단에서` : ''}
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.55, marginBottom: 12 }}>
-                  {q.question}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {q.options.map((o) => {
-                    const isPicked = picked === o.position;
-                    let bg = 'var(--white)';
-                    let border = '1px solid var(--line)';
-                    if (answered && o.isCorrect) {
-                      bg = 'var(--green-chip)';
-                      border = '2px solid var(--green)';
-                    } else if (answered && isPicked && !o.isCorrect) {
-                      bg = 'var(--red-chip)';
-                      border = '2px solid var(--red)';
-                    }
-                    return (
-                      <button
-                        key={o.position}
-                        type="button"
-                        disabled={answered}
-                        onClick={() => setQuizPicks((p) => ({ ...p, [qi]: o.position }))}
-                        style={{
-                          textAlign: 'left',
-                          padding: '11px 14px',
-                          borderRadius: 10,
-                          background: bg,
-                          border,
-                          fontSize: 14,
-                          lineHeight: 1.5,
-                          color: 'var(--ink)',
-                          cursor: answered ? 'default' : 'pointer',
-                        }}
-                      >
-                        {'①②③④'[o.position]} {o.label}
-                      </button>
-                    );
-                  })}
-                </div>
+          {banner}
 
-                {answered && (
-                  <div style={{ marginTop: 12 }}>
-                    <div
+          {quizSet.questions.map((q) => (
+            <div key={q.id} className="card" style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+                Q{q.position + 1}
+                {q.relatedTurnNo ? ` · ${q.relatedTurnNo}턴 판단에서` : ''}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.55, marginBottom: 12 }}>
+                {q.question}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {q.options.map((o) => {
+                  const isPicked = q.answeredOptionId === o.id;
+                  const isCorrect = q.correctOptionId === o.id;
+                  let bg = 'var(--white)';
+                  let border = '1px solid var(--line)';
+                  if (q.answered && isCorrect) {
+                    bg = 'var(--green-chip)';
+                    border = '2px solid var(--green)';
+                  } else if (q.answered && isPicked && !isCorrect) {
+                    bg = 'var(--red-chip)';
+                    border = '2px solid var(--red)';
+                  }
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      disabled={q.answered || busy}
+                      onClick={() => onAnswerQuiz(q.id, o.id)}
                       style={{
+                        textAlign: 'left',
+                        padding: '11px 14px',
+                        borderRadius: 10,
+                        background: bg,
+                        border,
                         fontSize: 14,
-                        fontWeight: 700,
-                        color: picked === correct?.position ? 'var(--green)' : 'var(--red)',
-                        marginBottom: 6,
+                        lineHeight: 1.5,
+                        color: 'var(--ink)',
+                        cursor: q.answered ? 'default' : 'pointer',
                       }}
                     >
-                      {picked === correct?.position ? '정답이에요' : '아쉬워요'}
-                    </div>
+                      {'①②③④'[o.position]} {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {q.answered && (
+                <div style={{ marginTop: 12 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: q.correct ? 'var(--green)' : 'var(--red)',
+                      marginBottom: 6,
+                    }}
+                  >
+                    {q.correct ? '정답이에요' : '아쉬워요'}
+                  </div>
+                  {q.explanation && (
                     <p style={{ margin: '0 0 8px', fontSize: 14, lineHeight: 1.65, color: 'var(--soft)' }}>
                       {q.explanation}
                     </p>
-                    {q.whyThisQuestion && (
-                      <p
-                        style={{
-                          margin: '0 0 8px',
-                          fontSize: 13,
-                          lineHeight: 1.6,
-                          color: 'var(--soft)',
-                          background: 'var(--bg)',
-                          borderRadius: 8,
-                          padding: '8px 10px',
-                        }}
-                      >
-                        왜 이 문제냐면 — {q.whyThisQuestion}
-                      </p>
-                    )}
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      근거: {q.source.title} · {q.source.orgName} ·{' '}
-                      {q.source.pageStart === q.source.pageEnd
-                        ? `${q.source.pageStart}쪽`
-                        : `${q.source.pageStart}–${q.source.pageEnd}쪽`}
-                    </div>
+                  )}
+                  {q.whyThisQuestion && (
+                    <p
+                      style={{
+                        margin: '0 0 8px',
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        color: 'var(--soft)',
+                        background: 'var(--bg)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                      }}
+                    >
+                      왜 이 문제냐면 — {q.whyThisQuestion}
+                    </p>
+                  )}
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    근거: {q.source.title} · {q.source.orgName} ·{' '}
+                    {q.source.pageStart === q.source.pageEnd
+                      ? `${q.source.pageStart}쪽`
+                      : `${q.source.pageStart}–${q.source.pageEnd}쪽`}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              )}
+            </div>
+          ))}
 
           <div className="cta-row" style={{ marginTop: 20 }}>
             <Link href="/library" className="btn btn-secondary">
@@ -422,20 +496,29 @@ export default function RewindClient() {
   }
 
   // ─────────────────────────────────────────── 턴 진행 / 결과 공개
-  const revealed = step === 'result';
-  const myAnswer = revealed ? answers[answers.length - 1] : null;
-  const wasRight = myAnswer?.action === turn.outcome.idealAction;
+  if (!turn) {
+    return (
+      <div>
+        <TopNav right="모의고사" />
+        <div className="page-narrow">
+          {banner}
+          {!busy && !error && <p className="lede">문제를 불러오는 중이에요…</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const revealed = step === 'result' && outcome !== null;
 
   return (
     <div>
-      <TopNav right={`${turn.turnNo} / ${TURNS.length}턴`} />
+      <TopNav right={`${turn.turnNo} / ${attempt?.totalTurns ?? '?'}턴`} />
       <div className="page-narrow">
         <div className="eyebrow">
-          {turn.asOfDate} 시점 · {turn.sector}
+          {turn.asOfDate} 시점{turn.sector ? ` · ${turn.sector}` : ''}
         </div>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>
-          {turn.stockName}{' '}
-          <span style={{ fontSize: 18, color: 'var(--soft)' }}>{won(turn.price)}</span>
+          {turn.stockName} <span style={{ fontSize: 18, color: 'var(--soft)' }}>{won(turn.price)}</span>
         </h1>
         {turn.holdingQty > 0 && (
           <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--muted)' }}>
@@ -444,10 +527,7 @@ export default function RewindClient() {
         )}
 
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
-          <ExamChart
-            points={turn.chartPoints}
-            outcomePoints={revealed ? turn.outcome.points : null}
-          />
+          <ExamChart points={turn.chartPoints} outcomePoints={revealed ? outcome!.outcomePoints : null} />
           {!revealed && (
             <p style={{ margin: '6px 2px 0', fontSize: 12, color: 'var(--muted)' }}>
               이후 흐름은 판단을 제출하면 공개돼요.
@@ -455,7 +535,6 @@ export default function RewindClient() {
           )}
         </div>
 
-        {/* 뉴스 */}
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {turn.news.map((n) => {
             const style = TAG_STYLE[n.tag] ?? TAG_STYLE['뉴스'];
@@ -465,10 +544,7 @@ export default function RewindClient() {
                 className="card"
                 style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'flex-start' }}
               >
-                <span
-                  className="pill"
-                  style={{ background: style.bg, color: style.fg, flex: 'none' }}
-                >
+                <span className="pill" style={{ background: style.bg, color: style.fg, flex: 'none' }}>
                   {n.tag}
                 </span>
                 <span style={{ fontSize: 14, lineHeight: 1.5 }}>{n.title}</span>
@@ -477,7 +553,6 @@ export default function RewindClient() {
           })}
         </div>
 
-        {/* 공시 */}
         {turn.disclosure && (
           <div style={{ marginTop: 10 }}>
             <button
@@ -518,7 +593,8 @@ export default function RewindClient() {
           </div>
         )}
 
-        {/* 판단 입력 */}
+        {banner}
+
         {!revealed && (
           <div className="card" style={{ marginTop: 14 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>어떻게 하시겠어요?</div>
@@ -530,7 +606,7 @@ export default function RewindClient() {
                   <button
                     key={a.key}
                     type="button"
-                    disabled={disabled}
+                    disabled={disabled || busy}
                     onClick={() => setAction(a.key)}
                     style={{
                       padding: '12px 8px',
@@ -550,10 +626,7 @@ export default function RewindClient() {
             </div>
 
             <div style={{ marginTop: 14 }}>
-              <label
-                htmlFor="memo"
-                style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}
-              >
+              <label htmlFor="memo" style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
                 왜 그렇게 판단했나요? <span style={{ color: 'var(--red)' }}>*</span>
               </label>
               <textarea
@@ -586,36 +659,34 @@ export default function RewindClient() {
               type="button"
               className="btn btn-primary btn-block"
               style={{ marginTop: 14 }}
-              disabled={!action || memo.trim().length < MIN_MEMO}
-              onClick={submitTurn}
+              disabled={busy || !action || memo.trim().length < MIN_MEMO}
+              onClick={onSubmitTurn}
             >
               제출하고 결과 보기
             </button>
           </div>
         )}
 
-        {/* 결과 공개 */}
-        {revealed && myAnswer && (
+        {revealed && outcome && (
           <div
             className="card"
             style={{
               marginTop: 14,
-              border: wasRight ? '2px solid var(--green)' : '1px solid var(--line)',
+              border: outcome.isAligned ? '2px solid var(--green)' : '1px solid var(--line)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span
                 className="pill"
                 style={{
-                  background: wasRight ? 'var(--green-chip)' : 'var(--red-chip)',
-                  color: wasRight ? 'var(--green)' : 'var(--red)',
+                  background: outcome.isAligned ? 'var(--green-chip)' : 'var(--red-chip)',
+                  color: outcome.isAligned ? 'var(--green)' : 'var(--red)',
                 }}
               >
-                {wasRight ? '모범답안과 같아요' : '모범답안과 달라요'}
+                {outcome.isAligned ? '모범답안과 같아요' : '모범답안과 달라요'}
               </span>
               <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                내 판단 {ACTION_LABEL[myAnswer.action]} · 모범답안{' '}
-                {ACTION_LABEL[turn.outcome.idealAction]}
+                내 판단 {ACTION_LABEL[outcome.myAction]} · 모범답안 {ACTION_LABEL[outcome.idealAction]}
               </span>
             </div>
 
@@ -623,14 +694,14 @@ export default function RewindClient() {
               style={{
                 fontSize: 18,
                 fontWeight: 800,
-                color: turn.outcome.changePct >= 0 ? 'var(--red)' : '#3e6fd8',
+                color: outcome.outcomeChangePct >= 0 ? 'var(--red)' : '#3e6fd8',
                 marginBottom: 6,
               }}
             >
-              {turn.outcome.summary}
+              {outcome.outcomeSummary}
             </div>
             <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.65, color: 'var(--soft)' }}>
-              {turn.outcome.idealRationale}
+              {outcome.idealRationale}
             </p>
             <div
               style={{
@@ -641,16 +712,17 @@ export default function RewindClient() {
                 color: 'var(--ink)',
               }}
             >
-              배울 점 — {turn.outcome.learningPoint}
+              배울 점 — {outcome.learningPoint}
             </div>
 
             <button
               type="button"
               className="btn btn-primary btn-block"
               style={{ marginTop: 14 }}
-              onClick={nextTurn}
+              onClick={onNext}
+              disabled={busy}
             >
-              {isLast ? '진단 리포트 보기' : '다음 턴으로'}
+              {outcome.completed ? '진단 리포트 보기' : '다음 턴으로'}
             </button>
           </div>
         )}
