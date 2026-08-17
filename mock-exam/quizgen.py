@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -196,10 +197,14 @@ def build_prompt(diag: Dict[str, Any], chunks: List[Dict[str, Any]],
 {sources}
 
 [요구사항]
-- 사용자가 실제로 한 판단과 직접 연결되는 문제일 것
-- 보기 4개는 모두 그럴듯하되 정답은 하나
-- 자료에 없는 내용을 지어내지 말 것
-- 아래 JSON 형식으로만 답할 것 (설명 문장 없이 JSON만)
+1. 정답은 반드시 **하나만** 성립해야 한다. 나머지 3개 보기는 명백히 틀린 내용으로 쓸 것.
+   (여러 개가 맞을 수 있는 보기를 만들면 문제로 성립하지 않는다)
+2. 오답 보기도 그럴듯해야 하지만, 자세히 보면 왜 틀렸는지 분명해야 한다.
+3. `why_this_question`에는 사용자가 실제로 적은 메모를 **직접 인용**할 것.
+   예: "{worst['turn_no']}턴에서 \\"(메모 일부)\\"라고 적으셨죠. …"
+4. 자연스러운 한국어로 쓸 것. 사전에 없는 조어를 만들지 말 것.
+5. 자료에 없는 내용을 지어내지 말 것. 해설은 자료의 표현을 근거로 쓸 것.
+6. 아래 JSON 형식으로만 답할 것 (설명 문장 없이 JSON만).
 
 {QUIZ_JSON_SCHEMA}"""
 
@@ -280,8 +285,66 @@ def generate_stub(diag: Dict[str, Any], chunks: List[Dict[str, Any]],
     }
 
 
-def generate_llm(prompt: str, provider: str, model: str, api_key: str) -> Optional[Dict[str, Any]]:
-    """Anthropic API로 생성. 실패하면 None을 돌려 호출부가 stub으로 넘어가게 한다."""
+def load_dotenv(path: Path) -> None:
+    """의존성 없이 .env를 읽어 환경변수로 올린다(이미 설정된 값은 덮어쓰지 않음)."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        print("  ! LLM 응답에서 JSON을 찾지 못했습니다")
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        print("  ! JSON 파싱 실패: %s" % exc)
+        return None
+
+
+def generate_openai(prompt: str, model: str, api_key: str) -> Optional[Dict[str, Any]]:
+    """OpenAI Chat Completions. response_format으로 JSON을 강제해 파싱 실패를 줄인다."""
+    import urllib.request
+
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system",
+             "content": "너는 한국어 투자 교육 코치다. 제공된 자료에만 근거해 문제를 만들고, "
+                        "반드시 요청된 JSON 형식으로만 답한다."},
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "max_completion_tokens": 1200,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=body,
+        headers={"content-type": "application/json", "authorization": "Bearer " + api_key},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        usage = payload.get("usage", {})
+        print("     토큰: 입력 %s · 출력 %s"
+              % (usage.get("prompt_tokens", "?"), usage.get("completion_tokens", "?")))
+        return _extract_json(payload["choices"][0]["message"]["content"])
+    except Exception as exc:
+        print("  ! OpenAI 호출 실패(%s)" % exc)
+        return None
+
+
+def generate_anthropic(prompt: str, model: str, api_key: str) -> Optional[Dict[str, Any]]:
     import urllib.request
 
     body = json.dumps({
@@ -299,17 +362,43 @@ def generate_llm(prompt: str, provider: str, model: str, api_key: str) -> Option
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=90) as response:
             payload = json.loads(response.read().decode("utf-8"))
         text = "".join(part.get("text", "") for part in payload.get("content", []))
-        match = re.search(r"\{.*\}", text, re.S)
-        if not match:
-            print("  ! LLM 응답에서 JSON을 찾지 못했습니다 — stub으로 대체")
-            return None
-        return json.loads(match.group(0))
+        return _extract_json(text)
     except Exception as exc:
-        print("  ! LLM 호출 실패(%s) — stub으로 대체" % exc)
+        print("  ! Anthropic 호출 실패(%s)" % exc)
         return None
+
+
+def resolve_provider() -> Dict[str, Any]:
+    """LLM_PROVIDER(openai|anthropic|stub)와 키 유무로 생성기를 정한다.
+
+    미지정이면 있는 키를 보고 자동 선택하고, 키가 없으면 stub으로 떨어진다 —
+    키 없이도 데모가 항상 돌아가야 하기 때문.
+    """
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+    if not provider:
+        provider = "openai" if openai_key else ("anthropic" if anthropic_key else "stub")
+
+    if provider == "openai" and openai_key:
+        # 기본값이 gpt-4o-mini인 이유(실측 비교):
+        #   최저가는 gpt-4.1-nano지만, 이 작업(한국어 4지선다 + 근거 인용)에서는
+        #   정답이 두 개 성립하는 문제나 어색한 조어("밀실적 판단 능력")가 나왔고,
+        #   why_this_question에 사용자 메모를 인용하라는 지시도 자주 무시했다.
+        #   비용 차이는 응시 1회당 1.2원 vs 1.6원 — 1000회를 돌려도 440원 차이라,
+        #   깨진 문제를 감수할 이유가 없다. 더 싸게 가려면 OPENAI_MODEL=gpt-4.1-nano.
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        return {"name": "openai:" + model,
+                "call": lambda p: generate_openai(p, model, openai_key)}
+    if provider == "anthropic" and anthropic_key:
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+        return {"name": "anthropic:" + model,
+                "call": lambda p: generate_anthropic(p, model, anthropic_key)}
+    return {"name": "stub", "call": None}
 
 
 def validate(quiz: Dict[str, Any]) -> bool:
@@ -502,6 +591,9 @@ def main() -> int:
     parser.add_argument("--max-questions", type=int, default=3, help="생성할 문항 수 (기본 3)")
     args = parser.parse_args()
 
+    # 저장소 루트의 .env에서 키를 읽는다(.env는 gitignore 대상).
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     settings = load_settings()
     conn = store.connect(settings.database_url)
 
@@ -530,10 +622,8 @@ def main() -> int:
         conn.close()
         return 0
 
-    import os
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-    generator = ("anthropic:%s" % model) if api_key else "stub"
+    backend = resolve_provider()
+    generator = backend["name"]
     print("퀴즈 생성 — 생성기: %s" % generator)
 
     print("임베딩 모델 로딩 중...")
@@ -554,8 +644,8 @@ def main() -> int:
         used_turns.add(worst["turn_no"])
 
         quiz = None
-        if api_key:
-            quiz = generate_llm(build_prompt(diag, chunks, worst), "anthropic", model, api_key)
+        if backend["call"]:
+            quiz = backend["call"](build_prompt(diag, chunks, worst))
             if quiz and not validate(quiz):
                 print("  ! 생성된 JSON이 형식에 안 맞아 stub으로 대체")
                 quiz = None

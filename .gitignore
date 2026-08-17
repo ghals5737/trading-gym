@@ -5,6 +5,11 @@
 # (이미 추적 중인 data/sources.csv는 영향 없음)
 /data/
 
+# API 키·비밀번호 — 절대 커밋 금지 (이 저장소는 public)
+.env
+.env.*
+!.env.example
+
 # Node 빌드 산출물
 node_modules/
 .next/
