@@ -42,6 +42,26 @@ class AnthropicConversationAnalyzer(
 			ConversationAnalysisPrompt.fallbackResult(turns)
 		}
 	}
+
+	override fun checkAnswer(turn: ConversationTurnInput): AnswerCheckResult {
+		if (apiKey.isBlank()) return ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		return try {
+			val prompt = ConversationAnalysisPrompt.buildCheckPrompt(turn)
+			val response = client.post()
+				.uri("/v1/messages")
+				.header("x-api-key", apiKey)
+				.header("anthropic-version", "2023-06-01")
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(AnthropicAnalysisRequest(model = model, maxTokens = 200, messages = listOf(AnthropicAnalysisMessage("user", prompt))))
+				.retrieve()
+				.body(AnthropicAnalysisResponse::class.java)
+			val text = response?.content?.firstOrNull()?.text.orEmpty()
+			ConversationAnalysisPrompt.parseCheck(text) ?: ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		} catch (e: Exception) {
+			log.warn("Anthropic 답변 체크 실패, 대체 판정으로 처리: ${e.message}")
+			ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		}
+	}
 }
 
 private data class AnthropicAnalysisRequest(

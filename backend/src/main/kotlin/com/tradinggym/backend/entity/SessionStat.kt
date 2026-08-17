@@ -15,23 +15,11 @@ import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 import java.util.UUID
 
-// report.metrics(3개) + report.habits(4개) + report.gamblingSignal을 전부 이 enum
-// 하나로 backing. JUDGMENT_ACCURACY는 이름이 결과(정답) 채점을 암시해서 이후
-// PRINCIPLE_ADHERENCE(원칙 준수율 — reason_tag와 실제 행동의 일치 여부)로 바꿀 예정
-// — 아직 미반영, db/schema.sql과 함께 나중에 한 번에 리네임하기로 함.
-enum class SessionStatKey {
-	JUDGMENT_ACCURACY,
-	DISCLOSURE_CHECK_RATE,
-	RISK_MANAGEMENT_SCORE,
-	IMPULSIVE_TRADING,
-	LOSS_AVERSION,
-	CONFIRMATION_BIAS,
-	DIVERSIFICATION,
-	GAMBLING_SIGNAL,
-}
-
-enum class StatTone { RED, AMBER, GREEN }
-
+// 예전엔 매매 이력에서 룰 기반으로 자동 채점했지만(reasonTag 제거로 3개 지표 근거가
+// 사라져서 없앴었음) — 지금은 completeSession 시점에 SessionSummaryService가
+// SessionStatAnalyzer(AI, reasonText까지 읽고 판단)로 채점한 결과를 여기에 영구 저장함.
+// 세션마다 한 번씩 쌓여서, 유저 단위로 시간순으로 모으면 "성장 추이"를 볼 수 있음
+// (온보딩 사전조사 진단은 investor_profiles에 별도로 저장돼 있어 여기와 안 섞임).
 @Entity
 @Table(
 	name = "session_stats",
@@ -49,12 +37,8 @@ class SessionStat(
 	@Column(name = "score_pct", nullable = false)
 	var scorePct: Int,
 
-	@Enumerated(EnumType.STRING)
-	@Column(nullable = false)
-	var tone: StatTone,
-
-	@Column(columnDefinition = "text")
-	var note: String? = null, // gambling_signal처럼 서술형 카드가 필요한 stat_key만 채움
+	@Column(nullable = false, columnDefinition = "text")
+	var note: String,
 ) {
 	@Id
 	@GeneratedValue(strategy = GenerationType.UUID)
@@ -62,4 +46,15 @@ class SessionStat(
 
 	@Column(name = "computed_at", nullable = false)
 	var computedAt: Instant = Instant.now()
+}
+
+enum class SessionStatKey {
+	JUDGMENT_ACCURACY,
+	DISCLOSURE_CHECK_RATE,
+	RISK_MANAGEMENT_SCORE,
+	IMPULSIVE_TRADING,
+	LOSS_AVERSION,
+	CONFIRMATION_BIAS,
+	DIVERSIFICATION,
+	GAMBLING_SIGNAL,
 }

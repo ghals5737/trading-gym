@@ -39,6 +39,24 @@ class GeminiConversationAnalyzer(
 			ConversationAnalysisPrompt.fallbackResult(turns)
 		}
 	}
+
+	override fun checkAnswer(turn: ConversationTurnInput): AnswerCheckResult {
+		if (apiKey.isBlank()) return ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		return try {
+			val prompt = ConversationAnalysisPrompt.buildCheckPrompt(turn)
+			val response = client.post()
+				.uri("/v1beta/models/{model}:generateContent?key={apiKey}", model, apiKey)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(GeminiAnalysisRequest(contents = listOf(GeminiAnalysisContent(parts = listOf(GeminiAnalysisPart(prompt))))))
+				.retrieve()
+				.body(GeminiAnalysisResponse::class.java)
+			val text = response?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text.orEmpty()
+			ConversationAnalysisPrompt.parseCheck(text) ?: ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		} catch (e: Exception) {
+			log.warn("Gemini 답변 체크 실패, 대체 판정으로 처리: ${e.message}")
+			ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		}
+	}
 }
 
 private data class GeminiAnalysisRequest(val contents: List<GeminiAnalysisContent>)

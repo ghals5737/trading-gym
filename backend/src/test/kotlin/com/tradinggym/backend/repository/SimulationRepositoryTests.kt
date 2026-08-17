@@ -1,19 +1,13 @@
 package com.tradinggym.backend.repository
 
-import com.tradinggym.backend.entity.RiskIntervention
-import com.tradinggym.backend.entity.RiskInterventionResponse
-import com.tradinggym.backend.entity.RiskInterventionType
-import com.tradinggym.backend.entity.SessionStat
-import com.tradinggym.backend.entity.SessionStatKey
 import com.tradinggym.backend.entity.SimulationSession
-import com.tradinggym.backend.entity.StatTone
 import com.tradinggym.backend.entity.Trade
 import com.tradinggym.backend.entity.TradeOrderType
-import com.tradinggym.backend.entity.TradeReason
 import com.tradinggym.backend.entity.TradeSide
 import com.tradinggym.backend.entity.TradeType
-import com.tradinggym.backend.user.UserEntity
-import com.tradinggym.backend.user.UserJpaRepository
+import com.tradinggym.backend.entity.TurnAction
+import com.tradinggym.backend.entity.TurnLog
+import com.tradinggym.backend.entity.UserEntity
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -29,11 +23,10 @@ class SimulationRepositoryTests {
 	@Autowired lateinit var userRepository: UserJpaRepository
 	@Autowired lateinit var sessionRepository: SimulationSessionRepository
 	@Autowired lateinit var tradeRepository: TradeRepository
-	@Autowired lateinit var statRepository: SessionStatRepository
-	@Autowired lateinit var interventionRepository: RiskInterventionRepository
+	@Autowired lateinit var turnLogRepository: TurnLogRepository
 
 	@Test
-	fun `session, trade, stat, intervention round-trip through the full graph`() {
+	fun `session, turn log, and trade round-trip through the full graph`() {
 		val user = userRepository.save(UserEntity(username = "sim-test-${System.nanoTime()}", passwordHash = "x"))
 
 		val session = sessionRepository.save(
@@ -42,12 +35,29 @@ class SimulationRepositoryTests {
 				startingCash = BigDecimal("10000000"),
 				currentCash = BigDecimal("9200000"),
 				currentTurnDate = LocalDate.of(2026, 1, 5),
+				targetEndDate = LocalDate.of(2026, 3, 5),
+			),
+		)
+
+		val turnLog = turnLogRepository.save(
+			TurnLog(
+				session = session,
+				turnNumber = 1,
+				turnDate = LocalDate.of(2026, 1, 5),
+				cash = session.currentCash,
+				borrowedAmount = BigDecimal.ZERO,
+				holdingsValue = BigDecimal.ZERO,
+				portfolioValue = session.currentCash,
+				tradeCount = 1,
+				action = TurnAction.TRADED,
 			),
 		)
 
 		val trade = tradeRepository.save(
 			Trade(
 				session = session,
+				turnLog = turnLog,
+				turnNumber = 1,
 				stockCode = "005930",
 				stockName = "대형전자 A",
 				side = TradeSide.BUY,
@@ -62,28 +72,7 @@ class SimulationRepositoryTests {
 				dayHighPrice = BigDecimal("72000"),
 				dayLowPrice = BigDecimal("68500"),
 				viewedDisclosure = false,
-				reasonTag = TradeReason.CHASE_BUY,
 				reasonText = "급등 뉴스 보고 따라 삼",
-				simulatedTradeDate = LocalDate.of(2026, 1, 5),
-			),
-		)
-
-		statRepository.save(
-			SessionStat(
-				session = session,
-				statKey = SessionStatKey.IMPULSIVE_TRADING,
-				scorePct = 85,
-				tone = StatTone.RED,
-			),
-		)
-
-		interventionRepository.save(
-			RiskIntervention(
-				session = session,
-				trade = trade,
-				riskType = RiskInterventionType.CHASE_BUY,
-				message = "이 매매는 추격매수 패턴이에요.",
-				userResponse = RiskInterventionResponse.IGNORED,
 				simulatedTradeDate = LocalDate.of(2026, 1, 5),
 			),
 		)
@@ -91,16 +80,8 @@ class SimulationRepositoryTests {
 		val sessionId = requireNotNull(session.id)
 
 		assertEquals(1, tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId).size)
-		assertEquals(TradeReason.CHASE_BUY, tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId).first().reasonTag)
-
-		val stat = statRepository.findBySessionIdAndStatKey(sessionId, SessionStatKey.IMPULSIVE_TRADING)
-		assertEquals(85, stat?.scorePct)
-		assertEquals(StatTone.RED, stat?.tone)
-
-		val interventions = interventionRepository.findBySessionId(sessionId)
-		assertEquals(1, interventions.size)
-		assertEquals(RiskInterventionResponse.IGNORED, interventions.first().userResponse)
-		assertEquals(trade.id, interventions.first().trade?.id)
+		assertEquals("급등 뉴스 보고 따라 삼", tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId).first().reasonText)
+		assertEquals(trade.turnLog.id, turnLog.id)
 
 		assertEquals(1, sessionRepository.findByUserIdOrderByStartedAtDesc(requireNotNull(user.id)).size)
 	}

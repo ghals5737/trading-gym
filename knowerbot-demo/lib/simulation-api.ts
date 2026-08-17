@@ -1,17 +1,9 @@
-import { apiBaseUrl, getAccessToken } from './auth';
+import { authFetch } from './auth';
 
 export type SimulationSessionStatus = 'ACTIVE' | 'COMPLETED';
-export type TradeSide = 'BUY' | 'SELL';
+export type TurnUnit = 'DAY' | 'WEEK' | 'MONTH';
+export type TradeSide = 'BUY' | 'SELL' | 'HOLD';
 export type TradeOrderType = 'MARKET' | 'LIMIT';
-export type TradeReason =
-  | 'FUNDAMENTALS'
-  | 'TECHNICAL_SIGNAL'
-  | 'STOP_LOSS'
-  | 'AVERAGING_DOWN'
-  | 'CHASE_BUY'
-  | 'IMPULSIVE'
-  | 'PLANNED_TAKE_PROFIT'
-  | 'OTHER';
 
 export interface SessionResponse {
   id: string;
@@ -20,6 +12,9 @@ export interface SessionResponse {
   currentCash: number;
   borrowedAmount: number;
   currentTurnDate: string;
+  targetEndDate: string;
+  turnCount: number;
+  maxTurns: number;
   startedAt: string;
   endedAt: string | null;
 }
@@ -39,31 +34,41 @@ export interface PricePoint {
   closePrice: number;
 }
 
+// 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터 — 뉴스가 있는 날짜는 드물어서
+// (가격이 크게 움직인 날 위주) 없을 때가 훨씬 많음(getStockNews가 204 반환).
+export interface StockNewsResponse {
+  headline: string;
+  summary: string;
+  source: string;
+  tradeDate: string;
+}
+
 export interface StockHistoryResponse {
   stockCode: string;
   stockName: string;
   points: PricePoint[];
 }
 
+// stockCode/stockName/orderType/quantity/day*Price는 side='HOLD'(관망)면 전부 null.
 export interface TradeResponse {
   id: string;
-  stockCode: string;
-  stockName: string;
+  stockCode: string | null;
+  stockName: string | null;
   side: TradeSide;
   tradeType: 'NORMAL' | 'FORCED_LIQUIDATION';
-  orderType: TradeOrderType;
+  orderType: TradeOrderType | null;
   limitPrice: number | null;
   filled: boolean;
   isCredit: boolean;
   leverageRatio: number | null;
-  quantity: number;
+  quantity: number | null;
   price: number | null;
-  dayOpenPrice: number;
-  dayHighPrice: number;
-  dayLowPrice: number;
+  dayOpenPrice: number | null;
+  dayHighPrice: number | null;
+  dayLowPrice: number | null;
   viewedDisclosure: boolean;
-  reasonTag: TradeReason | null;
-  reasonText: string | null;
+  reasonText: string;
+  turnNumber: number;
   simulatedTradeDate: string;
   createdAt: string;
 }
@@ -77,29 +82,25 @@ export interface CreateTradeRequest {
   leverageRatio?: number;
   quantity: number;
   viewedDisclosure?: boolean;
-  reasonTag?: TradeReason;
-  reasonText?: string;
+  reasonText: string;
 }
 
-class SimulationApiError extends Error {}
+export type TurnAction = 'HELD' | 'TRADED' | 'FORCED_LIQUIDATED';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getAccessToken();
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
-  });
-  if (response.status === 204) return null as T;
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new SimulationApiError(body.error || `요청이 실패했어요 (${response.status})`);
-  }
-  return response.json() as Promise<T>;
+export interface TurnLogResponse {
+  id: string;
+  turnNumber: number;
+  turnDate: string;
+  turnUnit: TurnUnit | null; // 1턴째는 건너뛴 게 없어서 null
+  cash: number;
+  borrowedAmount: number;
+  holdingsValue: number;
+  portfolioValue: number;
+  tradeCount: number;
+  action: TurnAction;
 }
+
+const request = authFetch;
 
 export function getActiveSession(): Promise<SessionResponse | null> {
   return request<SessionResponse | null>('/api/sessions/active');
@@ -114,10 +115,10 @@ export function getAvailableTradingDates(): Promise<string[]> {
   return request<string[]>('/api/sessions/available-dates');
 }
 
-export function createSession(startingCash: number, currentTurnDate: string): Promise<SessionResponse> {
+export function createSession(startingCash: number, currentTurnDate: string, targetEndDate: string): Promise<SessionResponse> {
   return request<SessionResponse>('/api/sessions', {
     method: 'POST',
-    body: JSON.stringify({ startingCash, currentTurnDate }),
+    body: JSON.stringify({ startingCash, currentTurnDate, targetEndDate }),
   });
 }
 
@@ -127,6 +128,11 @@ export function getQuotes(sessionId: string): Promise<QuoteResponse[]> {
 
 export function getStockHistory(sessionId: string, stockCode: string): Promise<StockHistoryResponse> {
   return request<StockHistoryResponse>(`/api/sessions/${sessionId}/stocks/${stockCode}/history`);
+}
+
+// 뉴스가 없는 날이 훨씬 많음(204 → null) — 프론트는 null이면 뉴스 카드를 안 보여주면 됨.
+export function getStockNews(sessionId: string, stockCode: string): Promise<StockNewsResponse | null> {
+  return request<StockNewsResponse | null>(`/api/sessions/${sessionId}/stocks/${stockCode}/news`);
 }
 
 export function recordTrade(sessionId: string, req: CreateTradeRequest): Promise<TradeResponse> {
@@ -140,10 +146,20 @@ export function listTrades(sessionId: string): Promise<TradeResponse[]> {
   return request<TradeResponse[]>(`/api/sessions/${sessionId}/trades`);
 }
 
-export function advanceTurn(sessionId: string): Promise<SessionResponse> {
-  return request<SessionResponse>(`/api/sessions/${sessionId}/advance-turn`, { method: 'POST' });
+// turnUnit(하루/일주일/한달)은 매번 필수 — 세션 생성이 아니라 턴 넘길 때마다 고름.
+// 이번 턴에 매매를 하나도 안 했으면 holdReasonText도 필수 — 백엔드가 검증함.
+export function advanceTurn(sessionId: string, turnUnit: TurnUnit, holdReasonText?: string): Promise<SessionResponse> {
+  return request<SessionResponse>(`/api/sessions/${sessionId}/advance-turn`, {
+    method: 'POST',
+    body: JSON.stringify({ turnUnit, holdReasonText }),
+  });
 }
 
 export function completeSession(sessionId: string): Promise<SessionResponse> {
   return request<SessionResponse>(`/api/sessions/${sessionId}/complete`, { method: 'POST' });
+}
+
+// 관망한 턴까지 포함한 턴별 타임라인 — AI 종합 분석/리포트용 원자료.
+export function listTurnLogs(sessionId: string): Promise<TurnLogResponse[]> {
+  return request<TurnLogResponse[]>(`/api/sessions/${sessionId}/turn-logs`);
 }

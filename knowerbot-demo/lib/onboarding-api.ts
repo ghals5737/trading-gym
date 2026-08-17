@@ -1,4 +1,4 @@
-import { apiBaseUrl, getAccessToken } from './auth';
+import { authFetch } from './auth';
 
 export type InvestorProfileType = 'STABLE' | 'NEUTRAL' | 'AGGRESSIVE';
 export type InvestorKnowledgeLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
@@ -16,24 +16,6 @@ export interface InvestorProfileResponse {
   createdAt: string;
 }
 
-class OnboardingApiError extends Error {}
-
-async function request<T>(path: string): Promise<T> {
-  const token = getAccessToken();
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (response.status === 204) return null as T;
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new OnboardingApiError(body.error || `요청이 실패했어요 (${response.status})`);
-  }
-  return response.json() as Promise<T>;
-}
-
 export function getMyInvestorProfile(): Promise<InvestorProfileResponse | null> {
-  return request<InvestorProfileResponse | null>('/api/onboarding/profile');
+  return authFetch<InvestorProfileResponse | null>('/api/onboarding/profile');
 }

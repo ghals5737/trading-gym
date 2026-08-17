@@ -27,3 +27,12 @@ data class StockHistoryResponse(
 	val stockName: String,
 	val points: List<PricePoint>,
 )
+
+// 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터(StockNews) 기반 — 뉴스가 있는 날짜는
+// 드물어서, "오늘" 것만이 아니라 최근 며칠 이내 가장 최근 것을 보여줌(SimulationService 참고).
+data class StockNewsResponse(
+	val headline: String,
+	val summary: String,
+	val source: String,
+	val tradeDate: LocalDate,
+)

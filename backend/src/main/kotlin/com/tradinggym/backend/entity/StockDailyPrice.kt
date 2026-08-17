@@ -11,7 +11,8 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
-// 2020-02~04 KRX 대형주 5종목 실데이터 (Yahoo Finance 조회, seed-data/stock_daily_prices.csv).
+// KRX 5종목(삼성전자·SK하이닉스·SKC·삼천당제약·한화오션) 최근 1년 실데이터
+// (Yahoo Finance 조회, seed-data/stock_daily_prices.csv).
 // 매매 체결가는 여기서 서버가 조회해서 결정함 — 클라이언트가 가격을 보내지 않음.
 @Entity
 @Table(

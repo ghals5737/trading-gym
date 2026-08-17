@@ -5,6 +5,7 @@
   python3 indexer.py --limit 1        # 테스트용으로 1개만
   python3 indexer.py --file a.pdf     # 단일 파일
   python3 indexer.py --force          # 해시가 같아도 다시 인덱싱(청킹 설정을 바꿨을 때)
+  python3 indexer.py --pages-only --force   # edu_pages(읽기용)만 채움 — 임베딩 재계산 없이 빠름
 """
 
 from __future__ import annotations
@@ -46,6 +47,10 @@ def main() -> int:
     parser.add_argument("--file", help="특정 PDF만 (data/raw 기준 상대경로)")
     parser.add_argument("--limit", type=int, help="처리할 파일 수 상한 (테스트용)")
     parser.add_argument("--force", action="store_true", help="해시가 같아도 다시 인덱싱")
+    parser.add_argument(
+        "--pages-only", action="store_true",
+        help="edu_pages(읽기용)만 채우고 청크·임베딩은 건드리지 않음 — edu_pages 최초 백필용",
+    )
     args = parser.parse_args()
 
     settings = load_settings()
@@ -98,7 +103,7 @@ def main() -> int:
     chunk_config = settings.chunking
     embedder = None  # 스킵만 하고 끝나는 경우 모델을 안 올리려고 지연 생성
 
-    counters = {"indexed": 0, "skipped": 0, "failed": 0, "chunks": 0}
+    counters = {"indexed": 0, "skipped": 0, "failed": 0, "chunks": 0, "pages": 0}
     excluded: List[str] = []
 
     print("")
@@ -124,6 +129,16 @@ def main() -> int:
                          result.stats.get("garbled_ratio")))
                 continue
 
+            document_id = store.upsert_document(conn, meta, digest)
+
+            if args.pages_only:
+                inserted_pages = store.insert_pages(conn, document_id, result.pages)
+                conn.commit()
+                counters["indexed"] += 1
+                counters["pages"] += inserted_pages
+                print("      페이지만 적재 완료 — %d쪽 (청크·임베딩은 그대로 둠)" % inserted_pages)
+                continue
+
             chunks = build_chunks(
                 result.pages,
                 int(chunk_config["chunk_size"]),
@@ -147,13 +162,15 @@ def main() -> int:
 
             embed_started = time.time()
             vectors = embedder.encode([c.content for c in chunks])
-            document_id = store.upsert_document(conn, meta, digest)
             inserted = store.insert_chunks(conn, document_id, chunks, meta.topic_tags, vectors)
+            inserted_pages = store.insert_pages(conn, document_id, result.pages)
             conn.commit()
 
             counters["indexed"] += 1
             counters["chunks"] += inserted
-            print("      적재 완료 — 청크 %d개 (%.1f초)" % (inserted, time.time() - embed_started))
+            counters["pages"] += inserted_pages
+            print("      적재 완료 — 청크 %d개 · %d쪽 (%.1f초)"
+                  % (inserted, inserted_pages, time.time() - embed_started))
 
         except KeyboardInterrupt:
             conn.rollback()
@@ -172,7 +189,7 @@ def main() -> int:
     print("인덱싱 요약  (%.1f초)" % (time.time() - started))
     print("-" * 62)
     print("  대상 파일     : %d개" % len(targets))
-    print("  인덱싱        : %d개 (청크 %d개)" % (counters["indexed"], counters["chunks"]))
+    print("  인덱싱        : %d개 (청크 %d개 · 페이지 %d개)" % (counters["indexed"], counters["chunks"], counters["pages"]))
     print("  변경없어 스킵 : %d개" % counters["skipped"])
     print("  실패·제외     : %d개" % counters["failed"])
     if unmatched_pdfs:
@@ -183,7 +200,7 @@ def main() -> int:
         for item in excluded:
             print("    - %s" % item)
     print("-" * 62)
-    print("  DB 누적       : 문서 %d개 · 청크 %d개" % (totals["documents"], totals["chunks"]))
+    print("  DB 누적       : 문서 %d개 · 청크 %d개 · 페이지 %d개" % (totals["documents"], totals["chunks"], totals["pages"]))
     print("=" * 62)
     return 0
 

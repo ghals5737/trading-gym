@@ -30,6 +30,14 @@ data class SavedAnswerResponse(
 	val rawAnswerText: String,
 )
 
+// saveAnswer 호출 결과 — accepted=false면 저장을 안 했다는 뜻이고(그 문항이랑 아예
+// 무관해 보이는 답), feedback을 채팅에 보여준 뒤 같은 문항을 다시 물어봐야 함.
+data class SaveAnswerResult(
+	val questionId: OnboardingQuestionId,
+	val accepted: Boolean,
+	val feedback: String?,
+)
+
 data class InvestorProfileResponse(
 	val id: UUID,
 	val profileType: InvestorProfileType, // 리스크 성향 (안정형/중립형/공격형)

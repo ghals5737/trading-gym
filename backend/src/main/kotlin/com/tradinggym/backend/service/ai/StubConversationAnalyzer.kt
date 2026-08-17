@@ -9,4 +9,7 @@ import org.springframework.stereotype.Component
 class StubConversationAnalyzer : ConversationAnalyzer {
 	override fun analyze(turns: List<ConversationTurnInput>): ConversationAnalysisResult =
 		ConversationAnalysisPrompt.fallbackResult(turns)
+
+	override fun checkAnswer(turn: ConversationTurnInput): AnswerCheckResult =
+		ConversationAnalysisPrompt.fallbackCheckResult(turn)
 }

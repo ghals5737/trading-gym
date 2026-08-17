@@ -41,6 +41,73 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// access token은 15분마다 만료됨(백엔드 JwtProperties 기준) — 온보딩 채팅처럼 오래 걸리는
+// 세션 도중 만료돼도 끊기지 않게, 401을 맞으면 refresh token으로 한 번 자동 갱신하고 재시도함.
+// lib/auth.ts의 authFetch와 같은 목적(별도 vanilla-JS 번들이라 로직은 중복 구현).
+let refreshInFlight = null;
+function refreshAccessToken() {
+  let refreshToken = null;
+  try { refreshToken = window.localStorage.getItem(REFRESH_TOKEN_KEY); } catch (e) {}
+  if (!refreshToken) return Promise.resolve(false);
+  return fetch(`${API_BASE}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!data) return false;
+      try {
+        window.localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
+        window.localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+      } catch (e) {}
+      return true;
+    })
+    .catch(() => false);
+}
+
+function currentAccessToken() {
+  try { return window.localStorage.getItem(ACCESS_TOKEN_KEY); } catch (e) { return null; }
+}
+
+// fetch를 그대로 대체 — headers에 authHeaders()를 미리 합쳐 넣고, 401이면 refresh 후 한 번만 재시도.
+// refresh까지 실패하면(리프레시 토큰도 만료) 로그인 화면으로 돌려보냄.
+//
+// 이 vanilla-JS 쪽과 lib/auth.ts(React 번들) 쪽에 authFetch가 각각 따로 있음 — 같은 JS
+// 실행 컨텍스트가 아니라 refreshInFlight를 공유 못 함. 페이지 로드 시 두 쪽이 거의 동시에
+// 401을 맞으면 둘 다 같은(1회용) refresh token으로 갱신을 시도해서 하나는 성공하고 하나는
+// 이미 소모된 토큰이라 실패하는 게 실제로 발생함(라이브로 재현·확인함) — 그 실패한 쪽이
+// 그대로 로그아웃되지 않도록, 시도 전후로 access token이 이미 바뀌어 있으면(다른 쪽이 이미
+// 갱신 성공) 새 토큰으로 재시도함.
+function authFetch(url, options) {
+  const opts = options || {};
+  const withAuth = () =>
+    fetch(url, Object.assign({}, opts, { headers: Object.assign({}, opts.headers, authHeaders()) }));
+  const tokenAtStart = currentAccessToken();
+  return withAuth().then((res) => {
+    if (res.status !== 401) return res;
+    if (currentAccessToken() !== tokenAtStart) {
+      // 다른 곳(React 쪽 authFetch 등)에서 그 사이 이미 갱신함 — 새 토큰으로 재시도.
+      return withAuth();
+    }
+    if (!refreshInFlight) {
+      refreshInFlight = refreshAccessToken().finally(() => { refreshInFlight = null; });
+    }
+    return refreshInFlight.then((refreshed) => {
+      if (refreshed || currentAccessToken() !== tokenAtStart) {
+        return withAuth();
+      }
+      try {
+        window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+        window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+        window.localStorage.removeItem('kg_logged_in');
+      } catch (e) {}
+      window.location.href = '/';
+      return Promise.reject(new Error('세션이 만료됐어요'));
+    });
+  });
+}
+
 const canvas = document.getElementById('stage');
 const loginFormEl = document.getElementById('login-form');
 const loginIdEl = document.getElementById('login-id');
@@ -149,7 +216,7 @@ const wander = {
 const botState = {
   mode: 'loading',
   baseY: 0,
-  nextSeatAt: 0,
+  nextSeatAt: 8,
   seatStartedAt: 0,
   sitStartedAt: 0,
   jumpStartedAt: 0,
@@ -164,6 +231,7 @@ const botState = {
   swimTargetX: 0,
   chatStartedAt: 0,
   targetScale: 1,
+  tourSelector: null,
 };
 
 function pickWaypoint() {
@@ -192,12 +260,26 @@ if (isLoggedIn) {
   document.body.classList.add('logged-in');
   if (chatInputEl) chatInputEl.disabled = false;
 }
+// 새로고침해도 이전 대화가 사라지지 않게, 페이지 뜨자마자 DB에 저장된 채팅 로그를
+// 미리 불러와서 채팅창(닫혀있어도 DOM엔 이미 그려짐)에 채워둠 — 열어보면 바로 보임.
+let chatHistoryLoaded = false;
+function loadChatHistory() {
+  if (chatHistoryLoaded || !isLoggedIn) return;
+  chatHistoryLoaded = true;
+  authFetch(`${API_BASE}/api/chat/messages`, {})
+    .then((res) => res.json())
+    .then((messages) => {
+      messages.forEach((m) => addChatMessage(m.role === 'USER' ? 'user' : 'bot', m.content));
+    })
+    .catch(() => {});
+}
+if (isLoggedIn) loadChatHistory();
 // 로그인 폼을 거치지 않고(이미 로그인된 채로) 페이지를 새로 열었을 때도 온보딩을
 // 안 했으면 보내야 하므로, startLoggedInDemo()의 리다이렉트와 별개로 여기서도 한 번 확인함.
 // /onboarding 자체에서는 확인 안 함 — 이미 그 페이지에 있는데 또 리다이렉트하면
 // 진행 중인 채팅 설문이 새로고침으로 끊길 수 있음.
 if (isLoggedIn && window.location.pathname !== '/onboarding') {
-  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+  authFetch(`${API_BASE}/api/onboarding/profile`, {})
     .then((res) => {
       // replace(그냥 href 아님) — 강제 리다이렉트라 "뒤로가기"로 이 페이지로 되돌아오면
       // 어차피 또 리다이렉트될 뿐이라 히스토리에 남길 이유가 없음.
@@ -205,9 +287,23 @@ if (isLoggedIn && window.location.pathname !== '/onboarding') {
     })
     .catch(() => {});
 }
+// 사전조사(온보딩) 페이지에 온 거 자체가 이미 설문하러 온 거라, 로봇을 클릭 안 해도
+// 자동으로 다가와서 채팅을 열게 함 — 처음 방문이든 "다시 진단받기"로 재방문이든 매번
+// 트리거함(kg_seen_intro_chat 여부와 무관). 모델 로딩 시간을 감안해 살짝 지연.
+if (isLoggedIn && window.location.pathname === '/onboarding') {
+  window.setTimeout(() => {
+    if (isLoggedIn) enterChatMode();
+  }, 1500);
+}
 let pendingStartAfterLogin = false;
 let autoChatTimer = 0;
 let onboardingChecked = false;
+// /onboarding?retake=1로 들어오면 프로필이 있어도 처음부터 다시 물어봄 — 마이페이지의
+// "다시 진단받기" 버튼이 이 쿼리로 진입시킴. 각 답은 upsert라 새로 답하면 예전 답을 덮어씀.
+let retakeRequested = false;
+try {
+  retakeRequested = new URLSearchParams(window.location.search).get('retake') === '1';
+} catch (e) {}
 // answers는 더 이상 여기서 안 들고 있음 — 매 턴 서버에 바로 저장되고(POST /answer),
 // 채점은 submit 시점에 서버가 저장된 대화 전체를 보고 한 번에 함.
 const surveyState = {
@@ -426,30 +522,9 @@ function addChatMessage(role, text) {
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
 }
 
-function mockAiReply(message) {
-  if (/위험|리스크|손실|레버리지/.test(message)) {
-    return {
-      text: '좋아요. 지금은 레버리지 비중과 손절 기준을 먼저 확인하는 흐름으로 볼게요.',
-      bubble: '리스크부터 체크할게요.',
-      action: 'seat',
-    };
-  }
-  if (/수영|내려|움직/.test(message)) {
-    return {
-      text: '움직임 모드로 전환해볼게요. 내려간 뒤 화면 위를 다시 돌아다닐 수 있어요.',
-      bubble: '다시 움직여볼게요.',
-      action: 'swim',
-    };
-  }
-  return {
-    text: '좋아요. 지금 화면을 기준으로 같이 확인해볼게요.',
-    bubble: '제가 같이 볼게요.',
-    action: 'chat',
-  };
-}
-
-function enterChatMode() {
-  if (!isLoggedIn) return;
+// enterChatMode(로그인 필요)와 knowerbotRequireLogin(로그인 없이도 다가옴, 아래) 둘 다
+// 쓰는 "다가오기" 동작만 뽑아둠 — 로그인 여부에 따라 뭘 물어볼지만 달라짐.
+function approachForChat() {
   setSeatAffordance(false);
   shadowDecal.visible = true;
   setChatOpen(false);
@@ -460,9 +535,26 @@ function enterChatMode() {
   botState.targetZ = target.z;
   botState.targetScale = target.scale;
   botState.chatStartedAt = performance.now() / 1000;
-  showBubble('불렀어요? 앞으로 갈게요.');
   setAction('walking');
 }
+
+function enterChatMode() {
+  if (!isLoggedIn) {
+    window.knowerbotRequireLogin();
+    return;
+  }
+  approachForChat();
+}
+
+// 로그인 안 한 채로 /simulation, /my처럼 로그인이 꼭 필요한 페이지에 들어오면 React 쪽에서
+// 이걸 불러서 로봇이 다가와 "로그인이 필요해요"라고 알려주게 함 — 실제 로그인은 유저가
+// 네비게이션의 로그인 버튼을 직접 눌러서 함(여기서 로그인 모달을 자동으로 열진 않음).
+let pendingLoginPrompt = false;
+window.knowerbotRequireLogin = function () {
+  if (isLoggedIn) return;
+  pendingLoginPrompt = true;
+  approachForChat();
+};
 
 function exitChatMode() {
   if (botState.mode !== 'approachChat' && botState.mode !== 'chatIdle') return;
@@ -476,6 +568,48 @@ function exitChatMode() {
   setAction('walking', 0.15);
 }
 
+// 첫 방문 가이드 투어(ProductTour, React)가 스텝마다 부르는 함수 — 셀렉터로 가리키는
+// nav 탭 쪽으로 걸어가서 서있게 함. 항상 셀렉터로 다시 찾게 해서(엘리먼트를 캐시하지
+// 않음) 투어가 페이지를 이동시켜도(같은 selector가 새 페이지의 TopNav에도 있음)
+// 자연스럽게 다시 그 탭 쪽으로 걸어감 — 페이지 전환 중 잠깐 못 찾아도 마지막으로 알던
+// 위치를 유지하다가 새 페이지가 뜨면 바로 이어서 따라감.
+function tourTargetFor(selector) {
+  const el = selector ? document.querySelector(selector) : null;
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  const seatX = rect.left + rect.width * 0.5;
+  const seatY = rect.bottom + 4;
+  const world = screenToWorld(seatX, seatY, WALK_Z);
+  return { x: world.x, y: world.y + 0.9 };
+}
+
+window.knowerbotPointAt = function (selector) {
+  // 신규 계정은 로그인 3초 뒤 "첫 채팅 인사"도 예약돼 있어서(kg_seen_intro_chat),
+  // 투어랑 동시에 처음 로그인하면 그 타이머가 나중에 끼어들어 투어 중 모드를 가로챌 수
+  // 있음 — 투어가 시작되면 그 인사 타이머는 취소함(투어 자체가 인사를 대신함).
+  clearTimeout(autoChatTimer);
+  botState.tourSelector = selector;
+  setChatOpen(false);
+  setSeatAffordance(false);
+  botState.targetScale = 1;
+  botState.targetZ = WALK_Z;
+  const target = tourTargetFor(selector);
+  if (target) {
+    botState.targetX = target.x;
+    botState.targetY = target.y;
+  }
+  botState.mode = 'approachTourPoint';
+  setAction('walking');
+};
+
+window.knowerbotStopPointing = function () {
+  if (botState.mode !== 'approachTourPoint' && botState.mode !== 'tourPoint') return;
+  botState.tourSelector = null;
+  pickWaypoint();
+  botState.mode = 'wander';
+  setAction('walking', 0.15);
+};
+
 async function startLoggedInDemo() {
   if (isLoggedIn) return;
   isLoggedIn = true;
@@ -488,12 +622,19 @@ async function startLoggedInDemo() {
   // 로그인 직후 이 계정이 아직 온보딩(투자성향 진단)을 안 했으면 그 페이지로 바로 보냄 —
   // 실패(네트워크 오류 등)하면 그냥 평소 흐름으로 진행(로그인 자체를 막지 않음).
   try {
-    const res = await fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() });
+    const res = await authFetch(`${API_BASE}/api/onboarding/profile`, {});
     if (res.status === 204) {
       window.location.replace('/onboarding');
       return;
     }
   } catch (e) {}
+
+  // 온보딩까지 다 끝난 계정이면 로그인하자마자 바로 대시보드로 — 랜딩 페이지 등
+  // 다른 곳에 머무르지 않음(이미 대시보드에 있었으면 그냥 이 페이지에서 계속 진행).
+  if (window.location.pathname !== '/dashboard') {
+    window.location.replace('/dashboard');
+    return;
+  }
 
   setChatOpen(false);
   showBubble('반가워요. 먼저 흐름을 살펴볼게요.', 3000);
@@ -507,6 +648,11 @@ async function startLoggedInDemo() {
 function startPostLoginSwim() {
   pendingStartAfterLogin = false;
   clearTimeout(autoChatTimer);
+  // ProductTour(React)가 모델 로딩이 끝나기 전에 이미 knowerbotPointAt으로 어디론가
+  // 걸어가고 있는 중이면(신규 계정은 첫 로그인 인사랑 투어가 동시에 걸릴 수 있음)
+  // 여기서 mode를 'wander'로 되돌리거나 인사 타이머를 다시 걸지 않음 — 투어가 곧
+  // "첫 인사" 역할까지 대신하는 셈이라 서로 안 겹치게 함.
+  if (botState.tourSelector) return;
   setSeatAffordance(false);
   shadowDecal.visible = true;
   botState.targetScale = 1;
@@ -540,34 +686,78 @@ function startPostLoginSwim() {
 function handleChatSubmit(message) {
   const text = message.trim();
   if (!text) return;
+  if (pendingAskResolve) {
+    addChatMessage('user', text);
+    const resolve = pendingAskResolve;
+    pendingAskResolve = null;
+    if (chatInputEl) chatInputEl.disabled = false;
+    resolve(text);
+    return;
+  }
   if (surveyState.active) {
     submitOnboardingAnswer(text);
     return;
   }
   addChatMessage('user', text);
-  const reply = mockAiReply(text);
-  window.setTimeout(() => {
-    addChatMessage('bot', reply.text);
-    showBubble(reply.bubble, 4200);
-  }, 480);
+  if (chatInputEl) chatInputEl.disabled = true;
+  // 유저 메시지는 서버가 저장하고, 최근 대화 맥락과 함께 AI에 넘겨 답변을 받아 그것도
+  // 저장한 뒤 답변만 돌려줌 — chat_messages 테이블에 실제로 쌓임(mockAiReply 대체).
+  authFetch(`${API_BASE}/api/chat/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+    .then((res) => res.json())
+    .then((reply) => {
+      addChatMessage('bot', reply.content);
+      showBubble(reply.content.length > 24 ? `${reply.content.slice(0, 22)}…` : reply.content, 4200);
+    })
+    .catch(() => {
+      addChatMessage('bot', '지금은 답하지 못했어요. 잠시 후 다시 말해주세요.');
+    })
+    .finally(() => {
+      if (chatInputEl) chatInputEl.disabled = false;
+    });
 }
 
-// 자유 텍스트 답변을 그대로 서버에 저장만 함(채점 없음) — 매 턴 "~로 이해했어요" 같은
-// 확인 멘트로 안 끊기고 바로 다음 질문으로 넘어가서 실제 대화처럼 자연스럽게 흘러감.
+// 모의투자에서 매수/매도/관망 이유를 물을 때 씀 — KnowerBot이 다가와서(enterChatMode) 채팅으로
+// 직접 물어보고, 사용자가 채팅으로 답하면 그 텍스트로 프라미스가 풀림. simulation-client.tsx의
+// React 쪽이 이 함수를 호출해서 await로 답을 받아감(별도 vanilla-JS 번들이라 window에 노출).
+let pendingAskQuestion = null;
+let pendingAskResolve = null;
+window.knowerbotAskReason = function (question) {
+  return new Promise((resolve) => {
+    pendingAskQuestion = question;
+    pendingAskResolve = resolve;
+    enterChatMode();
+  });
+};
+
+// 자유 텍스트 답변을 서버에 보냄 — 서버가 그 문항이랑 무관해 보이는 답인지 즉석에서
+// 체크해서(가벼운 AI 호출) accepted=false면 저장을 안 하고 feedback만 옴. 그럴 땐
+// index를 그대로 두고 같은 문항을 다시 물어봄. accepted=true여야 "~로 이해했어요" 같은
+// 확인 멘트 없이 바로 다음 질문으로 넘어가서 실제 대화처럼 자연스럽게 흘러감.
 // 채점+설명은 6문항이 다 모이면 finishOnboardingSurvey가 대화 전체를 한 번에 분석함.
 function submitOnboardingAnswer(text) {
   addChatMessage('user', text);
   const question = surveyState.questions[surveyState.index];
   if (chatInputEl) chatInputEl.disabled = true;
-  fetch(`${API_BASE}/api/onboarding/answer`, {
+  authFetch(`${API_BASE}/api/onboarding/answer`, {
     method: 'POST',
-    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ questionId: question.id, rawText: text }),
   })
     .then((res) => res.json())
-    .then(() => {
-      surveyState.index += 1;
+    .then((result) => {
       if (chatInputEl) chatInputEl.disabled = false;
+      if (!result.accepted) {
+        window.setTimeout(() => {
+          addChatMessage('bot', result.feedback || '음... 질문이랑 조금 다른 답변 같아요. 다시 한 번 말씀해주실래요?');
+          if (chatInputEl) chatInputEl.focus();
+        }, 480);
+        return;
+      }
+      surveyState.index += 1;
       window.setTimeout(askNextOnboardingQuestion, 550);
     })
     .catch(() => {
@@ -578,17 +768,32 @@ function submitOnboardingAnswer(text) {
 
 // 챗 패널을 열 때마다 한 번씩 확인: 아직 투자성향 진단이 없으면 그 자리에서
 // 온보딩 설문을 채팅으로 진행하고, 이미 있으면 평범한 인사만 함.
+// ?retake=1로 들어왔으면 프로필 존재 여부와 무관하게 무조건 처음부터 다시 물어봄.
 function maybeStartOnboardingSurvey() {
+  if (retakeRequested) {
+    retakeRequested = false;
+    onboardingChecked = true;
+    startOnboardingSurvey(true);
+    return;
+  }
   if (onboardingChecked) {
     if (!surveyState.active) greetInChat();
     return;
   }
   onboardingChecked = true;
-  fetch(`${API_BASE}/api/onboarding/profile`, { headers: authHeaders() })
+  authFetch(`${API_BASE}/api/onboarding/profile`, {})
     .then((res) => (res.status === 204 ? null : res.json()))
     .then((profile) => {
       if (profile) {
         greetInChat();
+        return;
+      }
+      // 프로필이 없으면 지금 있던 페이지(예: /simulation, /library)에서 그 자리에 바로
+      // 설문을 시작하지 않고, 사전조사 전용 페이지로 보냄 — 다른 페이지 내용 위에 채팅으로
+      // 설문이 겹쳐 보이는 게 어색해서. /onboarding에선 그 페이지의 자동 접근 로직이
+      // 다시 이 함수를 불러서(pathname이 이미 맞으니) 곧바로 설문을 시작함.
+      if (window.location.pathname !== '/onboarding') {
+        window.location.replace('/onboarding');
         return;
       }
       startOnboardingSurvey();
@@ -596,27 +801,40 @@ function maybeStartOnboardingSurvey() {
     .catch(() => greetInChat());
 }
 
+// 부를 때마다(챗 다시 열 때마다) 이 인사말이 대화창에 매번 새로 쌓이면 실제 대화 내용이
+// 안 보이고 이 문구만 반복돼서 지저분해짐 — 채팅 로그에는 페이지당 한 번만 남기고,
+// 말풍선은 부를 때마다 가볍게 보여줌(로그에는 안 쌓이니 반복돼도 괜찮음).
+let greetedThisPageLoad = false;
 function greetInChat() {
   showBubble('무엇을 같이 볼까요?', 4200);
-  addChatMessage('bot', '무엇을 같이 볼까요?');
+  if (!greetedThisPageLoad) {
+    greetedThisPageLoad = true;
+    addChatMessage('bot', '무엇을 같이 볼까요?');
+  }
   if (chatInputEl) chatInputEl.focus();
 }
 
 // 진행 중이던 답(POST /answer 때마다 서버에 즉시 저장됨)이 있으면 그 뒤부터 이어감 —
 // 문항 순서는 고정이라 "아직 답 안 한 첫 문항"을 서버가 준 progress로 계산하면 됨.
-function startOnboardingSurvey() {
+// retake=true면 기존 답 여부를 무시하고 0번 문항부터 전부 다시 물어봄 — 답은 문항별
+// upsert라 새로 답하면 예전 답을 그대로 덮어쓰고, 서버에 별도 초기화 요청은 필요 없음.
+function startOnboardingSurvey(retake) {
   if (chatInputEl) chatInputEl.disabled = true;
-  fetch(`${API_BASE}/api/onboarding/progress`, { headers: authHeaders() })
-    .then((res) => res.json())
+  const progressPromise = retake
+    ? Promise.resolve([])
+    : authFetch(`${API_BASE}/api/onboarding/progress`, {}).then((res) => res.json());
+  progressPromise
     .then((progress) => {
       const answeredIds = new Set(progress.map((p) => p.questionId));
       addChatMessage(
         'bot',
-        progress.length > 0
+        retake
+          ? '사전 조사를 다시 해볼게요. 편하게 말하듯 답해주세요.'
+          : progress.length > 0
           ? `저번에 이어서 할게요. ${progress.length}개는 이미 답했어요.`
           : '몇 가지만 물어볼게요. 투자 성향을 파악하는 데만 써요. 편하게 말하듯 답해주세요.',
       );
-      return fetch(`${API_BASE}/api/onboarding/questions`, { headers: authHeaders() })
+      return authFetch(`${API_BASE}/api/onboarding/questions`, {})
         .then((res) => res.json())
         .then((questions) => {
           surveyState.active = true;
@@ -649,9 +867,8 @@ function askNextOnboardingQuestion() {
 // AI에 한 번에 넘겨서 채점+설명을 같이 받아옴. 그래서 다른 호출보다 오래 걸릴 수 있음.
 function finishOnboardingSurvey() {
   addChatMessage('bot', '분석 중이에요... (조금 걸릴 수 있어요)');
-  fetch(`${API_BASE}/api/onboarding/submit`, {
+  authFetch(`${API_BASE}/api/onboarding/submit`, {
     method: 'POST',
-    headers: authHeaders(),
   })
     .then((res) => res.json())
     .then((result) => {
@@ -798,6 +1015,11 @@ function shortestAngleDelta(from, to) {
 //   1번 — 걸어가서 위젯에 앉는다 (approachSeat → sitting → jumpDown)
 //   2번 — 점프해서 위젯을 붙잡고 매달려 있다가 떨어진다 (approachSeat → jumpGrab → hangSwing → fallOff)
 function startSeatSequence() {
+  // nextSeatAt을 여기서 항상 먼저 미뤄둠 — 안 그러면(타겟을 못 찾아 아래에서 return하든,
+  // 시퀀스가 시작되든) 다음 프레임에 바로 또 시도해서 매 프레임 재시도(사실상 쿨다운 없음)
+  // 되거나, 위젯 방문이 끝나자마자 wander로 돌아온 즉시 또 새 방문이 시작돼 버림 —
+  // 원래 의도는 "가끔 위젯을 들르며 대부분은 그냥 돌아다니는" 느낌이었음.
+  botState.nextSeatAt = performance.now() / 1000 + 10 + Math.random() * 12;
   const sequence = Math.random() < 0.5 ? 1 : 2;
   botState.seatSequence = sequence;
   botState.seatEl = pickSeatElement(sequence);
@@ -1006,6 +1228,10 @@ new GLTFLoader().load(
       setAction('idle', 0);
       if (isLoggedIn || pendingStartAfterLogin) {
         startPostLoginSwim();
+      } else if (pendingLoginPrompt || botState.mode === 'approachChat' || botState.mode === 'chatIdle') {
+        // 모델 로딩 중에 knowerbotRequireLogin()이 이미 다가오라고 지시해놨으면
+        // (로그인 안 한 채로 /simulation, /my 등에 온 경우) 그 상태를 덮어쓰지 않음 —
+        // 안 그러면 로딩이 늦게 끝났을 때 다가오다 말고 도로 'ready'로 얼어붙음.
       } else {
         botState.mode = 'ready';
       }
@@ -1044,7 +1270,7 @@ function animate() {
       if (dist < 0.15 && now > wander.pauseUntil) {
         pickWaypoint();
         wander.pauseUntil = now + 0.8 + Math.random() * 1.6;
-        setAction(Math.random() < 0.25 && actions.flair ? 'flair' : 'idle');
+        setAction('idle');
       } else if (dist >= 0.15) {
         moveTowardX(wander.targetX, wander.speed, 1.8, dt);
         setAction('walking');
@@ -1082,7 +1308,23 @@ function animate() {
         botState.velocityX = 0;
         botState.mode = 'chatIdle';
         setAction('idle');
-        maybeStartOnboardingSurvey();
+        if (pendingAskQuestion) {
+          const q = pendingAskQuestion;
+          pendingAskQuestion = null;
+          addChatMessage('bot', q);
+          showBubble('답해주세요', 2400);
+          if (chatInputEl) {
+            chatInputEl.disabled = false;
+            chatInputEl.focus();
+          }
+        } else if (pendingLoginPrompt) {
+          pendingLoginPrompt = false;
+          addChatMessage('bot', '이 페이지는 로그인해야 이용할 수 있어요. 오른쪽 위 로그인 버튼을 눌러주세요.');
+          showBubble('로그인이 필요해요', 3000);
+          if (chatInputEl) chatInputEl.disabled = true; // 로그인 전엔 채팅도 못 쓰니 입력 막아둠
+        } else {
+          maybeStartOnboardingSurvey();
+        }
       }
     } else if (botState.mode === 'chatIdle') {
       const target = chatTarget();
@@ -1095,6 +1337,35 @@ function animate() {
       rig.position.z += (botState.targetZ - rig.position.z) * Math.min(1, dt * 3.5);
       rig.scale.setScalar(THREE.MathUtils.lerp(rig.scale.x, botState.targetScale, Math.min(1, dt * 3.5)));
       rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3.5);
+      setAction('idle');
+    } else if (botState.mode === 'approachTourPoint') {
+      const target = tourTargetFor(botState.tourSelector);
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+      }
+      const dx = botState.targetX - rig.position.x;
+      if (Math.abs(dx) > 0.16) {
+        moveTowardX(botState.targetX, 0.55, 2.2, dt);
+        setAction('walking');
+      } else {
+        botState.velocityX = 0;
+        botState.mode = 'tourPoint';
+        setAction('idle');
+      }
+      rig.position.y = botState.baseY;
+    } else if (botState.mode === 'tourPoint') {
+      // 페이지가 이동하면(투어가 다음 스텝으로 넘어가면) 같은 셀렉터가 새 페이지에도
+      // 있어서 타겟 좌표가 갱신됨 — approachTourPoint로 안 돌아가고 여기서 그냥
+      // 부드럽게 따라가게 해서 매 스텝 재접근 모션 없이 자연스럽게 이어짐.
+      const target = tourTargetFor(botState.tourSelector);
+      if (target) {
+        botState.targetX = target.x;
+        botState.targetY = target.y;
+      }
+      rig.position.x += (botState.targetX - rig.position.x) * Math.min(1, dt * 3);
+      rig.position.y = botState.baseY + Math.sin(t * 2.0) * 0.02;
+      rig.rotation.y += shortestAngleDelta(rig.rotation.y, MODEL_FACE_SEATED) * Math.min(1, dt * 3);
       setAction('idle');
     } else if (botState.mode === 'approachSeat') {
       const target = seatTarget();

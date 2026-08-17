@@ -16,6 +16,10 @@ interface StockDailyPriceRepository : JpaRepository<StockDailyPrice, UUID> {
 	// 턴 진행(다음 거래일로 이동)에 씀 — 실제 거래일 캘린더가 이 테이블의 날짜 자체임.
 	fun findTop1ByTradeDateGreaterThanOrderByTradeDateAsc(tradeDate: LocalDate): StockDailyPrice?
 
+	// 턴 단위(하루/일주일/한달)로 건너뛸 때 씀 — 목표일(target) 자체가 주말/휴일이라 시세가
+	// 없어도, 그 이후 첫 실제 거래일로 자연스럽게 스냅됨.
+	fun findTop1ByTradeDateGreaterThanEqualOrderByTradeDateAsc(tradeDate: LocalDate): StockDailyPrice?
+
 	fun existsByTradeDate(tradeDate: LocalDate): Boolean
 
 	// 종목 리스트(오늘 시가 일람)용 — 하루치, 종목 5개 전부.

@@ -9,8 +9,9 @@ import org.springframework.stereotype.Component
 import java.math.BigDecimal
 import java.time.LocalDate
 
-// seed-data/stock_daily_prices.csv를 DB에 채움 — 2020-02~04 KRX 대형주 5종목 실데이터
-// (Yahoo Finance 조회). 테이블이 비어있을 때만 실행, 재부팅해도 중복 안 됨.
+// seed-data/stock_daily_prices.csv를 DB에 채움 — KRX 5종목(삼성전자·SK하이닉스·SKC·
+// 삼천당제약·한화오션) 최근 1년 실데이터(Yahoo Finance 조회). 테이블이 비어있을 때만
+// 실행, 재부팅해도 중복 안 됨.
 @Component
 class StockPriceSeeder(private val repository: StockDailyPriceRepository) : ApplicationRunner {
 

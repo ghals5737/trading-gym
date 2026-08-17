@@ -21,4 +21,14 @@ class CodexCliConversationAnalyzer : ConversationAnalyzer {
 		return ConversationAnalysisPrompt.parse(output, turns.map { it.question.id }.toSet())
 			?: ConversationAnalysisPrompt.fallbackResult(turns)
 	}
+
+	override fun checkAnswer(turn: ConversationTurnInput): AnswerCheckResult {
+		val prompt = ConversationAnalysisPrompt.buildCheckPrompt(turn)
+		val output = CodexCli.run(prompt, timeoutSeconds = 30)
+		if (output == null) {
+			log.warn("codex exec 실패, 대체 판정으로 처리")
+			return ConversationAnalysisPrompt.fallbackCheckResult(turn)
+		}
+		return ConversationAnalysisPrompt.parseCheck(output) ?: ConversationAnalysisPrompt.fallbackCheckResult(turn)
+	}
 }

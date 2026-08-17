@@ -1,0 +1,53 @@
+package com.tradinggym.backend.dto
+
+import com.tradinggym.backend.entity.TradeSide
+import com.tradinggym.backend.entity.TradeType
+import com.tradinggym.backend.entity.TurnAction
+import com.tradinggym.backend.entity.TurnUnit
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+
+// 세션 하나를 턴 단위로 통째로 훑을 수 있게 묶은 응답 — 나중에 "이 세션을 보고 추천
+// 교육자료/PT를 골라달라"고 LLM에 넘길 프롬프트 재료로 쓸 걸 염두에 두고 설계함. 그래서
+// 판정(몰빵매수였는지 등)은 여기서 미리 안 내리고, trades.reasonText를 포함한 원본
+// 그대로 다 넘김 — 판단은 그 LLM 몫으로 남겨둠.
+data class SessionSummaryResponse(
+	val sessionId: UUID,
+	val startingCash: BigDecimal,
+	val finalPortfolioValue: BigDecimal,
+	val returnPct: BigDecimal,
+	val turnCount: Int,
+	val maxTurns: Int,
+	val totalTradeCount: Int, // HOLD 제외, 실제 매매만
+	val buyCount: Int,
+	val sellCount: Int,
+	val holdTurnCount: Int, // 관망으로 끝난 턴 수
+	val forcedLiquidationCount: Int,
+	val creditTradeCount: Int,
+	val uniqueStockCount: Int,
+	val disclosureCheckedBuyCount: Int,
+	val turns: List<TurnSummaryResponse>,
+)
+
+data class TurnSummaryResponse(
+	val turnNumber: Int,
+	val turnDate: LocalDate,
+	val turnUnit: TurnUnit?,
+	val action: TurnAction,
+	val portfolioValue: BigDecimal,
+	val borrowedAmount: BigDecimal,
+	val trades: List<TradeSummaryResponse>,
+)
+
+data class TradeSummaryResponse(
+	val side: TradeSide,
+	val stockName: String?,
+	val quantity: Int?,
+	val price: BigDecimal?,
+	val isCredit: Boolean,
+	val leverageRatio: BigDecimal?,
+	val tradeType: TradeType,
+	val viewedDisclosure: Boolean,
+	val reasonText: String,
+)

@@ -8,6 +8,7 @@ import psycopg
 
 from .chunking import Chunk
 from .embedding import to_pgvector
+from .pdf_parse import Page
 
 SCHEMA_SQL = """
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -42,6 +43,31 @@ CREATE INDEX IF NOT EXISTS edu_chunks_topic_tags_idx
   ON edu_chunks USING gin (topic_tags);
 CREATE INDEX IF NOT EXISTS edu_chunks_document_idx
   ON edu_chunks (document_id);
+
+CREATE TABLE IF NOT EXISTS edu_pages (
+  id SERIAL PRIMARY KEY,
+  document_id INT REFERENCES edu_documents(id) ON DELETE CASCADE,
+  page_number INT NOT NULL,
+  content TEXT NOT NULL,
+  UNIQUE (document_id, page_number)
+);
+
+CREATE INDEX IF NOT EXISTS edu_pages_document_idx
+  ON edu_pages (document_id);
+
+CREATE TABLE IF NOT EXISTS edu_articles (
+  id SERIAL PRIMARY KEY,
+  document_id INT REFERENCES edu_documents(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  page_start INT NOT NULL,
+  page_end INT NOT NULL,
+  topic_summary TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS edu_articles_document_idx
+  ON edu_articles (document_id);
 """
 
 
@@ -84,8 +110,16 @@ def get_document(conn: psycopg.Connection, filename: str) -> Optional[Dict[str, 
     return {"id": row[0], "file_hash": row[1]} if row else None
 
 
+def get_document_by_id(conn: psycopg.Connection, document_id: int) -> Optional[Dict[str, Any]]:
+    row = conn.execute(
+        "SELECT id, title, org_name FROM edu_documents WHERE id = %s", (document_id,)
+    ).fetchone()
+    return {"id": row[0], "title": row[1], "org_name": row[2]} if row else None
+
+
 def upsert_document(conn: psycopg.Connection, meta, file_hash: str) -> int:
-    """문서를 넣거나 갱신하고 id를 준다. 해시가 바뀌었으면 기존 청크는 지운다."""
+    """문서 메타데이터를 넣거나 갱신하고 id를 준다. (청크·페이지는 안 건드림 —
+    각각 insert_chunks/insert_pages가 필요할 때만 따로 갈아끼운다.)"""
     row = conn.execute(
         """
         INSERT INTO edu_documents (filename, file_hash, title, org_name, target, year, license, source_url)
@@ -104,9 +138,7 @@ def upsert_document(conn: psycopg.Connection, meta, file_hash: str) -> int:
         (meta.filename, file_hash, meta.title, meta.org_name, meta.target,
          meta.year, meta.license, meta.source_url),
     ).fetchone()
-    document_id = int(row[0])
-    conn.execute("DELETE FROM edu_chunks WHERE document_id = %s", (document_id,))
-    return document_id
+    return int(row[0])
 
 
 def insert_chunks(
@@ -116,6 +148,8 @@ def insert_chunks(
     topic_tags: Sequence[str],
     embeddings: Sequence[Sequence[float]],
 ) -> int:
+    """검색용(edu_chunks) — 기존 청크를 지우고 새로 넣는다."""
+    conn.execute("DELETE FROM edu_chunks WHERE document_id = %s", (document_id,))
     rows = [
         (document_id, chunk.index, chunk.page_start, chunk.page_end,
          chunk.content, list(topic_tags), to_pgvector(list(vector)))
@@ -128,6 +162,18 @@ def insert_chunks(
                 (document_id, chunk_index, page_start, page_end, content, topic_tags, embedding)
             VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
             """,
+            rows,
+        )
+    return len(rows)
+
+
+def insert_pages(conn: psycopg.Connection, document_id: int, pages: Sequence[Page]) -> int:
+    """읽기용(edu_pages) — 기존 페이지를 지우고 새로 넣는다. 오버랩 없는 원문 그대로."""
+    conn.execute("DELETE FROM edu_pages WHERE document_id = %s", (document_id,))
+    rows = [(document_id, page.number, page.text) for page in pages]
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO edu_pages (document_id, page_number, content) VALUES (%s, %s, %s)",
             rows,
         )
     return len(rows)
@@ -191,4 +237,38 @@ def search(
 def stats(conn: psycopg.Connection) -> Dict[str, int]:
     documents = conn.execute("SELECT count(*) FROM edu_documents").fetchone()[0]
     chunks = conn.execute("SELECT count(*) FROM edu_chunks").fetchone()[0]
-    return {"documents": int(documents), "chunks": int(chunks)}
+    pages = conn.execute("SELECT count(*) FROM edu_pages").fetchone()[0]
+    return {"documents": int(documents), "chunks": int(chunks), "pages": int(pages)}
+
+
+def get_pages(conn: psycopg.Connection, document_id: int) -> List[Dict[str, Any]]:
+    """문서의 모든 페이지(오버랩 없는 원문) — page_number 순서."""
+    rows = conn.execute(
+        "SELECT page_number, content FROM edu_pages WHERE document_id = %s ORDER BY page_number",
+        (document_id,),
+    ).fetchall()
+    return [{"page_number": r[0], "content": r[1]} for r in rows]
+
+
+def delete_articles(conn: psycopg.Connection, document_id: int) -> None:
+    conn.execute("DELETE FROM edu_articles WHERE document_id = %s", (document_id,))
+
+
+def insert_article(
+    conn: psycopg.Connection,
+    document_id: int,
+    title: str,
+    body: str,
+    page_start: int,
+    page_end: int,
+    topic_summary: str,
+) -> int:
+    row = conn.execute(
+        """
+        INSERT INTO edu_articles (document_id, title, body, page_start, page_end, topic_summary)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (document_id, title, body, page_start, page_end, topic_summary),
+    ).fetchone()
+    return int(row[0])
