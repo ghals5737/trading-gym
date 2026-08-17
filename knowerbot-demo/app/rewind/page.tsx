@@ -1,18 +1,9 @@
-import TopNav from '../../components/TopNav';
+import RewindClient from './rewind-client';
 
+// 모의고사(리와인드) — 차트+뉴스로 판단하고 이유를 메모로 남기면, 그 메모를 분석해
+// 습관을 진단하고 RAG로 만든 맞춤 문제를 준다.
+// 지금은 mock-exam/export_mock.py가 만든 목업 JSON을 쓰고, 백엔드 API가 붙으면
+// rewind-client.tsx의 import만 fetch로 바꾸면 된다.
 export default function RewindPage() {
-  return (
-    <div>
-      <TopNav right="준비 중" />
-      <div className="page-narrow" style={{ alignItems: 'center', textAlign: 'center' }}>
-        <div className="eyebrow" style={{ justifyContent: 'center' }}>
-          리와인드
-        </div>
-        <h1 style={{ fontSize: 28 }}>차트 리플레이는 준비 중이에요</h1>
-        <p className="lede">
-          실제 급락장 데이터를 턴 단위로 다시 살아보는 리와인드 모드는 곧 만나보실 수 있어요.
-        </p>
-      </div>
-    </div>
-  );
+  return <RewindClient />;
 }

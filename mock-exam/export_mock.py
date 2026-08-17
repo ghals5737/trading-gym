@@ -22,6 +22,8 @@ from lib import store  # noqa: E402
 from lib.settings import load_settings  # noqa: E402
 
 OUT_PATH = Path(__file__).resolve().parent / "mock-data.json"
+# 프론트가 import해서 쓰는 사본. 여기서 같이 써줘야 재생성 시 둘이 안 어긋난다.
+FRONT_PATH = Path(__file__).resolve().parent.parent / "knowerbot-demo" / "lib" / "exam-mock-data.json"
 
 
 def export(conn, user_key: str = "demo") -> dict:
@@ -159,6 +161,9 @@ def main() -> int:
     else:
         OUT_PATH.write_text(text + "\n", encoding="utf-8")
         print("생성 완료: %s (%.1f KB)" % (OUT_PATH.name, len(text) / 1024))
+        if FRONT_PATH.parent.is_dir():
+            FRONT_PATH.write_text(text + "\n", encoding="utf-8")
+            print("  프론트 사본: %s" % FRONT_PATH.relative_to(Path(__file__).resolve().parent.parent))
         print("  턴 %d개 · 응답 %d개 · 진단 %d개 · 퀴즈 %d문항"
               % (len(data["turns"]),
                  len(data["attempt"]["responses"]) if data["attempt"] else 0,

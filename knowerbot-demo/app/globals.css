@@ -789,3 +789,17 @@ h1 {
     width: min(560px, calc(100vw - 24px));
   }
 }
+
+/* 텍스트 라벨용 알약 배지 — .badge는 22px 고정 원형(단계 번호용)이라 문구를 못 담아서 따로 둠. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--green-chip);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
