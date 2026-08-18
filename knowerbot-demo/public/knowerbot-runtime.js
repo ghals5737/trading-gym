@@ -234,10 +234,13 @@ const botState = {
   tourSelector: null,
 };
 
+// 화면 오른쪽 구역 안에서만 돌아다니게 한다. 예전엔 좌우 전 구간을 무작위로 걸어다녀서
+// 본문(차트·카드) 위를 계속 가로질렀고 "정신사납다"는 피드백이 있었다. 챗으로 부르면
+// 어차피 chatTarget()으로 다가오니, 평소 배회 범위만 좁혀도 방해가 사라진다.
 function pickWaypoint() {
   const margin = 0.7;
   const halfW = Math.min(visibleHalfWidthAt(WALK_Z) * margin, 3.4);
-  wander.targetX = (Math.random() * 2 - 1) * halfW;
+  wander.targetX = (0.45 + Math.random() * 0.5) * halfW;
 }
 pickWaypoint();
 

@@ -803,3 +803,29 @@ h1 {
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* 로봇 숨기기 — 3D 캔버스와 부속 UI만 감춘다. 채팅 패널은 그대로 남아서
+   KnowerBot 대화는 계속 쓸 수 있다(TopNav의 토글이 body 클래스를 붙인다). */
+body.bot-hidden #stage,
+body.bot-hidden #seat-shadow,
+body.bot-hidden #bot-bubble,
+body.bot-hidden #bot-hitbox,
+body.bot-hidden #bot-close {
+  display: none !important;
+}
+
+.bot-toggle {
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--soft);
+  border-radius: 999px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bot-toggle:hover {
+  color: var(--ink);
+}

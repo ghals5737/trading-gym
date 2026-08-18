@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import BotToggle from './BotToggle';
 import LoginButton from './LoginButton';
 import useLoggedIn from './useLoggedIn';
 import { logout } from '../lib/auth';
@@ -41,6 +42,7 @@ export default function TopNav({ right }: { right?: React.ReactNode }) {
         })}
       </div>
       <div className="top-nav-right">
+        <BotToggle />
         {loggedIn ? (
           <>
             {right}

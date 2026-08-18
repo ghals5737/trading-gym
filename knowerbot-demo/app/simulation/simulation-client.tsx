@@ -31,21 +31,21 @@ import { warningFor } from '../../lib/onboarding-copy';
 
 const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일주일', MONTH: '한달' };
 
-// KnowerBot이 채팅으로 직접 물어봄(public/knowerbot-runtime.js가 window에 노출) — 그 벡터가
-// 아직 안 떠 있으면(로딩 지연 등) null을 돌려줘서 호출부가 매매를 취소하게 함.
+// 이유 메모 최소 길이. 한두 글자짜리 메모는 행동 리포트에서 쓸 수가 없어서 최소한만 강제한다.
+const MIN_REASON_LENGTH = 5;
+
 declare global {
   interface Window {
     knowerbotAskReason?: (question: string) => Promise<string>;
     knowerbotRequireLogin?: () => void;
   }
 }
-async function askReason(question: string): Promise<string | null> {
-  if (typeof window === 'undefined' || typeof window.knowerbotAskReason !== 'function') {
-    return null;
-  }
-  const answer = await window.knowerbotAskReason(question);
-  return answer.trim() ? answer.trim() : null;
-}
+
+// 매매 이유는 이 화면 안의 메모창으로 받는다.
+// 예전엔 KnowerBot이 채팅으로 물어보고 답을 기다렸는데(window.knowerbotAskReason),
+// 매매할 때마다 3D 로봇이 걸어와 채팅으로 대화해야 해서 흐름이 끊긴다는 피드백이 있었다.
+// 리와인드(모의고사)와 같은 방식(그 자리에서 메모 입력)으로 통일했다.
+// 이유를 남기는 것 자체는 그대로다 — 행동 리포트가 이 텍스트를 재료로 쓴다.
 
 // knowerbot-runtime.js는 <Script strategy="afterInteractive">라 이 컴포넌트가 먼저
 // 마운트될 수 있음 — window.knowerbotRequireLogin이 아직 없으면 뜰 때까지 잠깐 재시도.
@@ -158,6 +158,12 @@ export default function SimulationClient() {
   const [limitPriceInput, setLimitPriceInput] = useState('');
   const [pendingReason, setPendingReason] = useState('');
   const [asking, setAsking] = useState(false);
+  // 메모창 상태 — resolve를 들고 있다가 사용자가 확인/취소하면 askReason의 프라미스를 푼다.
+  const [reasonPrompt, setReasonPrompt] = useState<{
+    question: string;
+    resolve: (value: string | null) => void;
+  } | null>(null);
+  const [reasonDraft, setReasonDraft] = useState('');
   const [showDetail, setShowDetail] = useState(false);
   const [showNews, setShowNews] = useState(false);
   const [showRisk, setShowRisk] = useState(false);
@@ -336,7 +342,25 @@ export default function SimulationClient() {
     }
   }
 
-  // 매수 버튼을 누르면 먼저 KnowerBot이 채팅으로 다가와서 이유를 물어봄 — 답을 받은 뒤에야
+  // 메모창을 띄우고 사용자가 확인할 때까지 기다린다. 호출부는 예전 채팅 버전과 똑같이
+  // `const reason = await askReason(...)`로 쓰면 되고, 취소하면 null이 온다.
+  function askReason(question: string): Promise<string | null> {
+    setReasonDraft('');
+    return new Promise((resolve) => setReasonPrompt({ question, resolve }));
+  }
+
+  function submitReason() {
+    if (reasonDraft.trim().length < MIN_REASON_LENGTH) return;
+    reasonPrompt?.resolve(reasonDraft.trim());
+    setReasonPrompt(null);
+  }
+
+  function cancelReason() {
+    reasonPrompt?.resolve(null);
+    setReasonPrompt(null);
+  }
+
+  // 매수 버튼을 누르면 먼저 이유를 적는 메모창이 뜸 — 이유를 남긴 뒤에야
   // 신용매수 위험도 체크(필요하면 경고 모달)로 넘어가고, 최종적으로 매매가 기록됨.
   // 온보딩에서 "위험한 조합"으로 진단된 사용자는 경고 버퍼를 더 크게 잡아 더 일찍 경고함.
   async function attemptBuy() {
@@ -349,7 +373,7 @@ export default function SimulationClient() {
     const reason = await askReason(`${active.stockName} ${quantity}주를 ${credit ? '신용으로 ' : ''}매수하려는 이유가 뭐예요?`);
     setAsking(false);
     if (!reason) {
-      setActionResult({ type: 'warning', message: 'KnowerBot한테 이유를 말해줘야 매매가 진행돼요.' });
+      setActionResult({ type: 'warning', message: '이유를 남겨야 매매가 진행돼요.' });
       return;
     }
     setPendingReason(reason);
@@ -380,13 +404,13 @@ export default function SimulationClient() {
     const reason = await askReason(`${active.stockName} ${quantity}주를 매도하려는 이유가 뭐예요?`);
     setAsking(false);
     if (!reason) {
-      setActionResult({ type: 'warning', message: 'KnowerBot한테 이유를 말해줘야 매매가 진행돼요.' });
+      setActionResult({ type: 'warning', message: '이유를 남겨야 매매가 진행돼요.' });
       return;
     }
     executeTrade('SELL', reason);
   }
 
-  // 이번 턴에 매매가 하나도 없었으면 KnowerBot이 관망 이유를 먼저 물어봄 — 있으면 그냥 다음 턴으로.
+  // 이번 턴에 매매가 하나도 없었으면 관망 이유를 먼저 물어봄 — 있으면 그냥 다음 턴으로.
   async function handleAdvanceTurn() {
     if (!session || asking) return;
     const tradedThisTurn = trades.some((t) => t.turnNumber === session.turnCount);
@@ -396,7 +420,7 @@ export default function SimulationClient() {
       const reason = await askReason('이번 턴엔 매매가 없었네요. 왜 관망하기로 했어요?');
       setAsking(false);
       if (!reason) {
-        setActionResult({ type: 'warning', message: 'KnowerBot한테 관망 이유를 말해줘야 다음 턴으로 넘어가요.' });
+        setActionResult({ type: 'warning', message: '관망한 이유를 남겨야 다음 턴으로 넘어가요.' });
         return;
       }
       holdReason = reason;
@@ -853,7 +877,7 @@ export default function SimulationClient() {
                 예상 금액 {estimate.toLocaleString()}원 ({orderType === 'MARKET' ? '시장가 · 시가 기준' : '지정가 기준(체결 안 될 수 있음)'}) · 신용거래 시 1.5배 표기
               </p>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
-                매수·매도 버튼을 누르면 KnowerBot이 다가와서 이유를 물어봐요 — 채팅으로 답해주세요.
+                매수·매도 버튼을 누르면 판단한 이유를 적는 메모창이 떠요.
               </p>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={attemptBuy} disabled={asking} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
@@ -906,7 +930,7 @@ export default function SimulationClient() {
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                 {session.turnCount >= session.maxTurns
                   ? '최대 턴에 도달했어요 — 시뮬레이션을 종료하고 리포트를 확인해보세요.'
-                  : '이번 턴에 매매 없이 다음 턴으로 넘어가면 KnowerBot이 관망 이유를 물어봐요.'}
+                  : '이번 턴에 매매 없이 다음 턴으로 넘어가면 관망한 이유를 적게 돼요.'}
               </p>
               <button
                 onClick={handleCompleteSession}
@@ -971,6 +995,62 @@ export default function SimulationClient() {
         />
       )}
       {showNews && stockNews && <NewsDetailModal news={stockNews} onClose={() => setShowNews(false)} />}
+      {reasonPrompt && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <button type="button" className="modal-close" aria-label="닫기" onClick={cancelReason}>
+              ✕
+            </button>
+            <div>
+              <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>{reasonPrompt.question}</h2>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+                지금 판단한 이유를 적어두면, 나중에 결과와 대조해서 어떤 근거가 맞고 틀렸는지 알 수 있어요.
+              </p>
+            </div>
+            <textarea
+              autoFocus
+              rows={3}
+              value={reasonDraft}
+              onChange={(e) => setReasonDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // 줄바꿈은 그대로 두고, ⌘/Ctrl+Enter로 빠르게 제출.
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitReason();
+              }}
+              placeholder="예: 실적이 개선되고 있어서 지금 가격이 싸다고 봤어요"
+              style={{
+                width: '100%',
+                borderRadius: 10,
+                border: '1px solid var(--line)',
+                background: 'var(--white)',
+                color: 'var(--ink)',
+                padding: '10px 12px',
+                fontSize: 14,
+                lineHeight: 1.6,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {reasonDraft.trim().length < MIN_REASON_LENGTH
+                ? `${MIN_REASON_LENGTH}자 이상 적어주세요 (${reasonDraft.trim().length}/${MIN_REASON_LENGTH})`
+                : '좋아요. ⌘/Ctrl+Enter로도 제출할 수 있어요.'}
+            </div>
+            <div className="cta-row">
+              <button type="button" className="btn btn-secondary" onClick={cancelReason}>
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={reasonDraft.trim().length < MIN_REASON_LENGTH}
+                onClick={submitReason}
+              >
+                이유 남기고 계속
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showRisk && (
         <RiskInterventionModal
           quantity={`${quantity}주`}
