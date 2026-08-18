@@ -23,6 +23,11 @@ import {
   type ExamTurnOutcome,
   type QuizSet,
 } from '../../lib/exam-api';
+import { AUTOFILL_PRESETS, autofillExam, type AutofillPreset } from '../../lib/exam-autofill';
+
+// 개발 중에만 노출되는 테스트 도구. 5턴을 손으로 푸는 게 번거로워서 만든 것이라
+// 프로덕션 빌드에서는 버튼 자체가 렌더되지 않는다.
+const DEV_TOOLS = process.env.NODE_ENV === 'development';
 
 // 모의고사 화면. 진단·퀴즈 생성은 전부 백엔드(/api/exam)가 하고, 여기서는 단계 전환과
 // 입력만 담당한다. 예전엔 목업 JSON + 프론트 진단이었는데, 규칙이 두 곳에 있으면
@@ -179,6 +184,28 @@ export default function RewindClient() {
     setStep('turn');
   };
 
+  // 테스트용: 남은 턴을 프리셋 답안으로 자동 제출하고 바로 리포트까지 간다.
+  const onAutofill = async (preset: AutofillPreset) => {
+    let target = attempt;
+    if (!target) {
+      const started = await run('모의고사를 시작하는 중', () => startExam());
+      if (!started) return;
+      target = started;
+      setAttempt(started);
+    }
+    const from = turn?.turnNo ?? target.currentTurnNo;
+    const done = await run(`${preset.label} 답안으로 채우는 중`, async () => {
+      await autofillExam(target!.attemptId, preset, from, target!.totalTurns, (p) =>
+        setBusyLabel(`${preset.label} 답안으로 채우는 중 (${p.turnNo}/${p.total}턴)`),
+      );
+      return getExamReport(target!.attemptId);
+    });
+    if (!done) return;
+    setReport(done);
+    setOutcome(null);
+    setStep('report');
+  };
+
   const onGenerateQuiz = async () => {
     if (!attempt) return;
     // 이미 만들어둔 세트가 있으면 재사용 — LLM 호출을 아낀다.
@@ -218,6 +245,35 @@ export default function RewindClient() {
   };
 
   // ─────────────────────────────────────────── 공통 조각
+  const devPanel = DEV_TOOLS ? (
+    <div
+      className="card"
+      style={{ marginTop: 12, border: '1px dashed var(--muted)', background: 'transparent' }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>
+        🧪 테스트 도구 (개발 모드에서만 보여요)
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {AUTOFILL_PRESETS.map((preset) => (
+          <button
+            key={preset.key}
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={busy}
+            title={preset.description}
+            onClick={() => onAutofill(preset)}
+          >
+            {preset.label}로 채우기
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+        남은 턴을 미리 정해둔 답안으로 제출하고 바로 진단 리포트로 넘어가요.
+        메모에 진단 규칙이 잡는 표현이 들어 있어서 결과도 그대로 나옵니다.
+      </div>
+    </div>
+  ) : null;
+
   const banner = (
     <>
       {busy && (
@@ -299,6 +355,7 @@ export default function RewindClient() {
           </div>
 
           {banner}
+          {devPanel}
 
           <div className="cta-row" style={{ marginTop: 20 }}>
             <button type="button" className="btn btn-primary" onClick={onStart} disabled={busy}>
@@ -594,6 +651,7 @@ export default function RewindClient() {
         )}
 
         {banner}
+        {devPanel}
 
         {!revealed && (
           <div className="card" style={{ marginTop: 14 }}>
