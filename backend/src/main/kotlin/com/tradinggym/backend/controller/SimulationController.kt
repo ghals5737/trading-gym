@@ -4,6 +4,8 @@ import com.tradinggym.backend.dto.AdvanceTurnRequest
 import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.QuoteResponse
+import com.tradinggym.backend.dto.RiskWarningRequest
+import com.tradinggym.backend.dto.RiskWarningResponse
 import com.tradinggym.backend.dto.SessionResponse
 import com.tradinggym.backend.dto.SessionStatCategoryScoreResponse
 import com.tradinggym.backend.dto.SessionStatScoreResponse
@@ -100,6 +102,15 @@ class SimulationController(
 	@GetMapping("/{sessionId}/trades")
 	fun listTrades(authentication: Authentication, @PathVariable sessionId: UUID): List<TradeResponse> =
 		simulationService.listTrades(authentication.name, sessionId)
+
+	// 신용매수 진행 전, 프론트가 계산한 예상 담보비율을 갖고 AI가 그 자리에서 경고 메시지를
+	// 만듦 — 매매는 아직 기록 안 됨(RiskInterventionModal에서 "그래도 진행" 눌러야 recordTrade 호출).
+	@PostMapping("/{sessionId}/risk-warning")
+	fun generateRiskWarning(
+		authentication: Authentication,
+		@PathVariable sessionId: UUID,
+		@RequestBody request: RiskWarningRequest,
+	): RiskWarningResponse = simulationService.generateRiskWarning(authentication.name, sessionId, request)
 
 	// turnUnit(하루/일주일/한달)은 매번 필수 — 세션 고정값이 아니라 턴 넘길 때마다 프론트가 고름.
 	@PostMapping("/{sessionId}/advance-turn")

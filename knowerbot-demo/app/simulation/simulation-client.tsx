@@ -18,6 +18,7 @@ import {
   listTrades,
   advanceTurn,
   completeSession,
+  generateRiskWarning,
   type SessionResponse,
   type QuoteResponse,
   type TradeResponse,
@@ -169,6 +170,10 @@ export default function SimulationClient() {
   const [showNews, setShowNews] = useState(false);
   const [showRisk, setShowRisk] = useState(false);
   const [pendingRiskRatio, setPendingRiskRatio] = useState<number | null>(null);
+  // AI가 만드는 위험 경고 문구 — 담보비율 계산이 끝나자마자(모달을 띄우는 시점에) 같이
+  // 요청함. 로딩 중이거나 실패하면 모달 쪽에서 원래 있던 고정 문구로 대체함.
+  const [riskWarningMessage, setRiskWarningMessage] = useState<string | null>(null);
+  const [riskWarningLoading, setRiskWarningLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
@@ -407,10 +412,41 @@ export default function SimulationClient() {
       if (expectedRatio < MAINTENANCE_RATIO * 100 + warningBufferPct) {
         setPendingRiskRatio(expectedRatio);
         setShowRisk(true);
+        loadRiskWarning(active.stockName, quantity, leverageRatio, expectedRatio, reason);
         return;
       }
     }
     executeTrade('BUY', reason);
+  }
+
+  // 담보비율 계산이 끝나 경고 모달을 띄우는 시점에 같이 호출 — 실패하면 null로 남겨서
+  // 모달이 원래 있던 고정 문구로 대체하게 함(RiskInterventionModal 참고).
+  async function loadRiskWarning(
+    stockName: string,
+    qty: number,
+    leverageRatio: number,
+    expectedRatio: number,
+    reasonText: string,
+  ) {
+    if (!session) return;
+    setRiskWarningMessage(null);
+    setRiskWarningLoading(true);
+    try {
+      const res = await generateRiskWarning(session.id, {
+        stockName,
+        quantity: qty,
+        leverageRatio,
+        expectedCollateralRatioPct: Math.round(expectedRatio),
+        liquidationThresholdPct: MAINTENANCE_RATIO * 100,
+        reasonText,
+        diagnosisWarning: riskWarningText,
+      });
+      setRiskWarningMessage(res.message);
+    } catch (e) {
+      setRiskWarningMessage(null);
+    } finally {
+      setRiskWarningLoading(false);
+    }
   }
 
   async function attemptSell() {
@@ -1106,8 +1142,16 @@ export default function SimulationClient() {
           quantity={`${quantity}주`}
           expectedRatioPct={pendingRiskRatio}
           diagnosisWarning={riskWarningText}
-          onCancel={() => setShowRisk(false)}
-          onProceed={() => executeTrade('BUY', pendingReason)}
+          aiMessage={riskWarningMessage}
+          aiLoading={riskWarningLoading}
+          onCancel={() => {
+            setShowRisk(false);
+            setRiskWarningMessage(null);
+          }}
+          onProceed={() => {
+            executeTrade('BUY', pendingReason);
+            setRiskWarningMessage(null);
+          }}
         />
       )}
       {liquidationEvent && (
@@ -1402,16 +1446,27 @@ function RiskInterventionModal({
   quantity,
   expectedRatioPct,
   diagnosisWarning,
+  aiMessage,
+  aiLoading,
   onCancel,
   onProceed,
 }: {
   quantity: string;
   expectedRatioPct: number | null;
   diagnosisWarning: string | null;
+  aiMessage: string | null;
+  aiLoading: boolean;
   onCancel: () => void;
   onProceed: () => void;
 }) {
   const ratioLabel = expectedRatioPct != null && Number.isFinite(expectedRatioPct) ? `${expectedRatioPct.toFixed(0)}%` : riskIntervention.expectedRatio;
+  // AI가 만든 메시지가 오면 그걸 쓰고, 로딩 중이거나 실패했으면(aiMessage=null) 원래 있던
+  // 고정 문구로 대체 — 경고 자체가 안 뜨는 것보다는 낫다는 원칙(SessionStatAnalysisPrompt의
+  // fallbackResult와 같은 결).
+  const warningText =
+    aiMessage ??
+    `지금 신용매수 ${quantity}를 진행하면 담보비율이 ${ratioLabel}까지 떨어져요. ` +
+      `${riskIntervention.liquidationThreshold} 아래로 내려가면 — 내 의사와 상관없이 반대매매가 발생할 수 있어요.`;
   return (
     <div
       style={{
@@ -1456,9 +1511,7 @@ function RiskInterventionModal({
         </div>
         <h2 style={{ margin: 0, fontSize: 22 }}>잠깐, 이 매매는 위험해요</h2>
         <p style={{ margin: 0, fontSize: 14, color: 'var(--soft)', lineHeight: 1.6 }}>
-          지금 신용매수 {quantity}를 진행하면 담보비율이 {ratioLabel}까지
-          떨어져요. {riskIntervention.liquidationThreshold} 아래로 내려가면 — 내 의사와 상관없이
-          반대매매가 발생할 수 있어요.
+          {aiLoading ? 'AI 코치가 지금 상황을 살펴보고 있어요...' : warningText}
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[

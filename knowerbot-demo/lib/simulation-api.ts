@@ -142,6 +142,29 @@ export function recordTrade(sessionId: string, req: CreateTradeRequest): Promise
   });
 }
 
+export interface RiskWarningRequest {
+  stockName: string;
+  quantity: number;
+  leverageRatio: number;
+  expectedCollateralRatioPct: number;
+  liquidationThresholdPct: number;
+  reasonText: string;
+  diagnosisWarning: string | null;
+}
+
+export interface RiskWarningResponse {
+  message: string;
+}
+
+// 신용매수 진행 전, 담보비율이 위험 수준까지 떨어지면 AI가 그 자리에서 경고 메시지를 만듦
+// (유저가 이미 답한 매매 이유까지 참고함) — 매매 자체는 아직 기록 안 됨.
+export function generateRiskWarning(sessionId: string, req: RiskWarningRequest): Promise<RiskWarningResponse> {
+  return request<RiskWarningResponse>(`/api/sessions/${sessionId}/risk-warning`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
 export function listTrades(sessionId: string): Promise<TradeResponse[]> {
   return request<TradeResponse[]>(`/api/sessions/${sessionId}/trades`);
 }

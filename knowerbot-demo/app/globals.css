@@ -65,9 +65,12 @@ button {
 }
 /* 로그인 전에도 로봇(#stage/#bot-hitbox/#bot-bubble)은 보이고 돌아다녀야
    knowerbotRequireLogin()의 "로그인이 필요해요" 접근+말풍선이 실제로 보임.
-   실제 대화 기능(채팅창)만 로그인 후로 gate. */
-body:not(.logged-in) #chat-panel,
-body:not(.logged-in) #bot-close {
+   실제 대화 기능(채팅창)만 로그인 후로 gate — #bot-close(닫기 버튼)는 로그인 여부와
+   무관하게 항상 쓸 수 있어야 함(안 그러면 "로그인이 필요해요" 상태를 닫을 방법이
+   없어짐). 기본 상태는 opacity:0/pointer-events:none이라 .active 없인 어차피
+   안 보이고 안 눌림(#bot-close 정의 참고) — 그래서 여기서 굳이 또 숨길 필요가 없음.
+   */
+body:not(.logged-in) #chat-panel {
   visibility: hidden;
 }
 /* login modal: hidden until explicitly opened via a "로그인" button, and

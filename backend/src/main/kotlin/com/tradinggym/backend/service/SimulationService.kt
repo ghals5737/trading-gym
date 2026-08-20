@@ -5,6 +5,8 @@ import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.PricePoint
 import com.tradinggym.backend.dto.QuoteResponse
+import com.tradinggym.backend.dto.RiskWarningRequest
+import com.tradinggym.backend.dto.RiskWarningResponse
 import com.tradinggym.backend.dto.SessionResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
 import com.tradinggym.backend.dto.StockNewsResponse
@@ -28,6 +30,7 @@ import com.tradinggym.backend.repository.StockNewsRepository
 import com.tradinggym.backend.repository.TradeRepository
 import com.tradinggym.backend.repository.TurnLogRepository
 import com.tradinggym.backend.repository.UserJpaRepository
+import com.tradinggym.backend.service.ai.RiskWarningGenerator
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -49,6 +52,7 @@ class SimulationService(
 	private val stockNewsRepository: StockNewsRepository,
 	private val turnLogRepository: TurnLogRepository,
 	private val sessionSummaryService: SessionSummaryService,
+	private val riskWarningGenerator: RiskWarningGenerator,
 ) {
 
 	@Transactional
@@ -315,6 +319,14 @@ class SimulationService(
 	fun listTrades(username: String, sessionId: UUID): List<TradeResponse> {
 		val session = requireOwnedSession(username, sessionId)
 		return tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(requireNotNull(session.id)).map { it.toResponse() }
+	}
+
+	// 신용매수를 진행하기 전, 프론트가 예상 담보비율을 미리 계산해서 넘기면 AI가 그 자리에서
+	// 경고 메시지를 만들어 돌려줌 — 매매는 아직 기록 안 됨(사용자가 "그래도 진행"을 눌러야
+	// 실제 recordTrade가 호출됨). 세션 소유권만 확인하고 그 외엔 DB에 손 안 댐(저장 없음).
+	fun generateRiskWarning(username: String, sessionId: UUID, request: RiskWarningRequest): RiskWarningResponse {
+		requireOwnedSession(username, sessionId)
+		return RiskWarningResponse(riskWarningGenerator.generate(request))
 	}
 
 	// currentTurnDate를 요청받은 turnUnit(하루/일주일/한달)만큼 건너뛴 다음, 그 시점 이후

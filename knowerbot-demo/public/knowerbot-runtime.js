@@ -1240,7 +1240,17 @@ new GLTFLoader().load(
         // (로그인 안 한 채로 /simulation, /my 등에 온 경우) 그 상태를 덮어쓰지 않음 —
         // 안 그러면 로딩이 늦게 끝났을 때 다가오다 말고 도로 'ready'로 얼어붙음.
       } else {
-        botState.mode = 'ready';
+        // 로그인 안 한 방문자도(랜딩 페이지 등) 로봇이 그냥 가만히 서있지 않고 돌아다니게
+        // 함 — 랜딩 페이지 기능 카드들도 data-knower-seat가 붙어있어서 원래 로그인 여부와
+        // 무관하게 방문하는 연출이 의도였는데, animate 루프의 !isLoggedIn 강제 idle 때문에
+        // 실제로는 로그인 전엔 항상 멈춰있던 버그였음.
+        rig.position.x = -2.2;
+        rig.position.y = botState.baseY;
+        rig.position.z = WALK_Z;
+        rig.scale.setScalar(1);
+        pickWaypoint();
+        botState.mode = 'wander';
+        setAction('walking', 0.15);
       }
     });
    } catch (e) {
@@ -1267,7 +1277,7 @@ function animate() {
 
   if (rig.children.length) {
     const now = performance.now() / 1000;
-    if (!isLoggedIn || botState.mode === 'ready') {
+    if (botState.mode === 'ready') {
       setAction('idle');
       rig.position.y = botState.baseY;
     } else if (botState.mode === 'wander') {

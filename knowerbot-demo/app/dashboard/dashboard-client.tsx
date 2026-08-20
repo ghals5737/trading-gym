@@ -14,6 +14,34 @@ import {
 // tier-card의 3개 지표 자리 = 정확성/침착성/공격성 그대로.
 const TIER_CATEGORY_KEYS: SessionStatCategory[] = ['ACCURACY', 'COMPOSURE', 'AGGRESSIVENESS'];
 
+const TIER_STAGES = ['새싹', '성장', '숙련', '고수', '마스터'];
+
+// "체급"(예: "성장 2단계 · 관찰형") = 단계(종합 점수 + 세션 수 상한) + 유형(가장 약한 축)
+// 조합 — 세션이 하나도 없으면(신규 계정) mock 문구로 대체(report.tier, 빈 화면보다 예시가 나음).
+// 종합 점수는 공격성을 (100-공격성)으로 뒤집어서(낮을수록 좋은 지표라) 셋 다 "높을수록
+// 좋다" 방향으로 맞춘 뒤 평균 냄 — SessionStatCategoryMapper의 역전 규칙과 같은 이유.
+function computeTier(stats: AggregateStatCategoryResponse[] | null, sessionCount: number): string {
+  if (!stats || stats.length === 0 || sessionCount === 0) return report.tier;
+  const acc = stats.find((s) => s.categoryKey === 'ACCURACY')?.avgScorePct ?? 50;
+  const comp = stats.find((s) => s.categoryKey === 'COMPOSURE')?.avgScorePct ?? 50;
+  const stability = 100 - (stats.find((s) => s.categoryKey === 'AGGRESSIVENESS')?.avgScorePct ?? 50);
+  const overall = (acc + comp + stability) / 3;
+
+  // 점수만으로 정하면 세션 1번에 운 좋게 잘하면 바로 "고수"가 되는 게 이상해서 — 완료한
+  // 세션 수로 올라갈 수 있는 단계 상한을 따로 걸고, 점수 기준 단계와 상한 중 낮은 쪽을 씀.
+  const scoreStageIndex = overall >= 90 ? 4 : overall >= 75 ? 3 : overall >= 60 ? 2 : overall >= 40 ? 1 : 0;
+  const sessionCap = sessionCount <= 1 ? 0 : sessionCount <= 3 ? 1 : sessionCount <= 6 ? 2 : sessionCount <= 10 ? 3 : 4;
+  const stageName = TIER_STAGES[Math.min(scoreStageIndex, sessionCap)];
+  // 같은 단계 안의 세부 단계(1~3)도 세션 수로 매김 — 세션을 더 진행할수록 올라감.
+  const subStage = Math.min(3, Math.max(1, Math.ceil(sessionCount / 2)));
+
+  // 셋 중 가장 약한 축으로 유형을 정함 — 다 웬만큼 괜찮으면(70점 이상) "균형형".
+  const weakest = Math.min(acc, comp, stability);
+  const type = weakest >= 70 ? '균형형' : weakest === acc ? '관찰형' : weakest === comp ? '동요형' : '저돌형';
+
+  return `${stageName} ${subStage}단계 · ${type}`;
+}
+
 export default function DashboardClient() {
   const [aggregateStats, setAggregateStats] = useState<AggregateStatCategoryResponse[] | null>(null);
 
@@ -35,10 +63,12 @@ export default function DashboardClient() {
     const mockFallback = report.metrics.find((m) => m.label === label)?.value ?? '-';
     return { label, value: stat ? `${stat.avgScorePct}점` : mockFallback };
   });
+  const sessionCount = aggregateStats && aggregateStats.length > 0 ? Math.max(...aggregateStats.map((s) => s.sessionCount)) : 0;
+  const tier = computeTier(aggregateStats, sessionCount);
 
   return (
     <div>
-      <TopNav right={`${user.nickname}님 · ${report.tier.split(' · ')[0]}`} />
+      <TopNav right={`${user.nickname}님 · ${tier.split(' · ')[0]}`} />
       <div className="page" style={{ paddingTop: 56, gap: 40 }}>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -52,7 +82,7 @@ export default function DashboardClient() {
 
         <div className="tier-card">
           <span className="tier-label">나의 투자 체급</span>
-          <span className="tier-name">{report.tier}</span>
+          <span className="tier-name">{tier}</span>
           <div className="tier-metric-row">
             {metrics.map((m) => (
               <div className="tier-metric" key={m.label}>
