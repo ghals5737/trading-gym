@@ -963,8 +963,11 @@ function simTrainerTarget() {
 // 랜덤으로 고르고(pickSeatElement) 그 방문이 끝날 때까지는 botState.seatEl에
 // 고정해서 씀 — 매 프레임 다시 뽑으면 접근 도중 목표가 흔들림.
 function pickSeatElement(sequence) {
-  // 2번(스윙) 시퀀스는 카드 4개가 아니라 "홈으로" 버튼을 잡으러 감 — 버튼처럼
-  // 가느다란 걸 붙잡고 매달리는 게 카드 위에 앉는 것보다 자연스러워서 분리함.
+  // 1번(앉기)은 카드류([data-knower-seat]), 2번(스윙)은 버튼류([data-knower-swing-seat]) —
+  // 버튼처럼 가느다란 걸 붙잡고 매달리는 게 카드 위에 앉는 것보다 자연스러워서 분리함.
+  // 예전엔 상단 nav바(TopNav)에 두 속성이 다 붙어있어서 페이지가 바뀌어도 항상 nav로만
+  // 갔었음 — 지금은 nav에서 빼고 각 페이지(대시보드/마이/스파링/PT/자료실)의 실제 콘텐츠
+  // 카드·버튼에 붙여서, 어느 페이지에 있느냐에 따라 그 페이지 안에서만 골라짐.
   const selector = sequence === 2 ? '[data-knower-swing-seat]' : '[data-knower-seat]';
   const els = document.querySelectorAll(selector);
   if (!els.length) return null;
@@ -1028,8 +1031,9 @@ function startSeatSequence() {
   setChatOpen(false);
   botState.targetScale = 1;
   botState.targetZ = WALK_Z;
-  setSeatAffordance(true);
-  updateSeatShadow(target);
+  // 그림자/카드 강조 표시는 여기서 미리 안 켬 — 로봇이 아직 다가가는 중(approachSeat)일
+  // 때부터 뜨면 "미리 알려주는" 느낌이라 부자연스러움. 실제로 도착했을 때(sitOnWidget/
+  // startHangSwing)만 켬.
   showBubble(
     botState.seatSequence === 1
       ? '저 위젯에서 위험 신호를 한번 볼게요.'
@@ -1049,6 +1053,7 @@ function sitOnWidget() {
   rig.position.y = botState.targetY;
   shadowDecal.visible = false;
   setSeatAffordance(true);
+  updateSeatShadow(seatTarget());
   showBubble('이 구간은 AI 코치가 개입하기 좋은 타이밍이에요.', 4200);
   setAction('sitting', 0.22);
 }
@@ -1095,6 +1100,8 @@ function startHangSwing() {
   botState.hangStartedAt = performance.now() / 1000;
   rig.position.x = botState.targetX;
   rig.position.y = botState.targetY;
+  setSeatAffordance(true);
+  updateSeatShadow(seatTarget());
   setAction(actions.swingStart ? 'swingStart' : 'sitting', 0.12);
 }
 
@@ -1389,7 +1396,7 @@ function animate() {
       const p = Math.min(1, (now - botState.jumpStartedAt) / botState.jumpDuration);
       const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
       rig.position.x = THREE.MathUtils.lerp(botState.startX, botState.targetX, eased);
-      rig.position.y = THREE.MathUtils.lerp(botState.startY, botState.targetY, eased) + Math.sin(p * Math.PI) * 0.55;
+      rig.position.y = THREE.MathUtils.lerp(botState.startY, botState.targetY, eased) + Math.sin(p * Math.PI) * 0.3;
       const turnP = THREE.MathUtils.smoothstep(p, 0.35, 0.92);
       const landFacing = botState.seatSequence === 2 ? MODEL_FACE_RIGHT : MODEL_FACE_SEATED;
       rig.rotation.y = botState.jumpStartRotation + shortestAngleDelta(botState.jumpStartRotation, landFacing) * turnP;

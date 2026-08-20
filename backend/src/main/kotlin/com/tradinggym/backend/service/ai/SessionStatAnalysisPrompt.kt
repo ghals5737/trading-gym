@@ -16,7 +16,10 @@ object SessionStatAnalysisPrompt {
 		return """
 			너는 '트레이딩 짐'이라는 모의투자 교육 서비스의 AI 코치야. 사용자가 방금 끝낸 모의투자
 			세션 하나를 턴 순서대로 아래에 줄게(관망한 턴도 포함, 각 매매마다 사용자가 직접 쓴
-			이유 텍스트도 같이 있어). 이걸 다 읽고 8개 지표를 각각 0~100점으로 채점해줘.
+			이유 텍스트도 같이 있어). 일부 턴에는 그 기간에 실제로 있었던 뉴스(📰)도 같이
+			붙어있으니, 그 뉴스가 났는데도 매매 이유에 반영이 안 됐는지, 아니면 뉴스에 휩쓸려
+			충동적으로 반응했는지도 판단에 참고해줘. 이걸 다 읽고 8개 지표를 각각 0~100점으로
+			채점해줘.
 
 			세션 요약: 시작자금 ${summary.startingCash}원, 최종자산 ${summary.finalPortfolioValue}원
 			(수익률 ${summary.returnPct}%), 총 ${summary.turnCount}턴, 매매 ${summary.totalTradeCount}건
@@ -56,7 +59,12 @@ object SessionStatAnalysisPrompt {
 				"  - $detail · 이유: \"${t.reasonText}\""
 			}
 		}
-		return "[턴 ${turnNumber}] ${turnDate} (${action})\n$tradeLines"
+		val newsLines = if (news.isEmpty()) {
+			""
+		} else {
+			"\n" + news.joinToString("\n") { n -> "  📰 (${n.tradeDate} ${n.stockCode}) ${n.headline}" }
+		}
+		return "[턴 ${turnNumber}] ${turnDate} (${action})\n$tradeLines$newsLines"
 	}
 
 	// "KEY: 72 | 이유" 줄을 각 지표마다 관대하게 찾음. 8개 다 못 찾으면 파싱 실패로 보고

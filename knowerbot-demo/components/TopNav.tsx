@@ -20,7 +20,7 @@ export default function TopNav({ right }: { right?: React.ReactNode }) {
 
   return (
     <nav className="top-nav">
-      <Link href="/dashboard" className="top-nav-brand" data-knower-swing-seat="">
+      <Link href="/dashboard" className="top-nav-brand">
         <span className="badge">짐</span>
         트레이딩 짐
       </Link>
@@ -33,7 +33,6 @@ export default function TopNav({ right }: { right?: React.ReactNode }) {
               href={tab.href}
               className={`top-nav-tab${active ? ' active' : ''}`}
               data-tour={tab.tourId}
-              data-knower-seat=""
             >
               {tab.label}
             </Link>

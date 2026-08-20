@@ -1,5 +1,6 @@
 package com.tradinggym.backend.controller
 
+import com.tradinggym.backend.dto.AggregateStatCategoryResponse
 import com.tradinggym.backend.dto.AggregateStatResponse
 import com.tradinggym.backend.dto.ProductTourStatusResponse
 import com.tradinggym.backend.service.AggregateStatService
@@ -28,4 +29,8 @@ class UserController(
 	@GetMapping("/aggregate-stats")
 	fun getMyAggregateStats(authentication: Authentication): List<AggregateStatResponse> =
 		aggregateStatService.getMyAggregateStats(authentication.name)
+
+	@GetMapping("/aggregate-stat-categories")
+	fun getMyAggregateStatCategories(authentication: Authentication): List<AggregateStatCategoryResponse> =
+		aggregateStatService.getMyAggregateStatCategories(authentication.name)
 }

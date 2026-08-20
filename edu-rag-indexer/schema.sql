@@ -60,8 +60,16 @@ CREATE TABLE IF NOT EXISTS edu_articles (
   page_start INT NOT NULL,
   page_end INT NOT NULL,
   topic_summary TEXT,
+  -- Kotlin 백엔드 SessionStatKey enum과 동일한 8개 값 — /pt 맞춤 퀴즈가 쓰는 약점 지표와
+  -- 자료실 글을 같은 어휘로 연결해서, "이 지표가 약하면 이 글들부터" 필터링이 가능하게 함.
+  target_stat_key TEXT CHECK (target_stat_key IN (
+    'JUDGMENT_ACCURACY', 'DISCLOSURE_CHECK_RATE', 'RISK_MANAGEMENT_SCORE', 'IMPULSIVE_TRADING',
+    'LOSS_AVERSION', 'CONFIRMATION_BIAS', 'DIVERSIFICATION', 'GAMBLING_SIGNAL'
+  )),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS edu_articles_document_idx
   ON edu_articles (document_id);
+CREATE INDEX IF NOT EXISTS edu_articles_stat_key_idx
+  ON edu_articles (target_stat_key);

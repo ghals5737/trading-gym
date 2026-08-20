@@ -46,6 +46,11 @@ class PersonalizedQuiz(
 
 	@Column(name = "source_page_end")
 	var sourcePageEnd: Int?,
+
+	// 유저 전체 평균이 아니라 특정 세션 하나의 스탯만 보고 만들어졌으면 그 세션 id —
+	// generateForUser()로 만든 퀴즈는 null(전체 평균 기반), generateForSession()은 채움.
+	@Column(name = "source_session_id")
+	var sourceSessionId: UUID?,
 ) {
 	@Id
 	@GeneratedValue(strategy = GenerationType.UUID)

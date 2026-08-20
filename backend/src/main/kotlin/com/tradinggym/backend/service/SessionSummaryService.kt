@@ -1,17 +1,24 @@
 package com.tradinggym.backend.service
 
+import com.tradinggym.backend.dto.SessionStatCategoryScoreResponse
 import com.tradinggym.backend.dto.SessionStatScoreResponse
 import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.TradeSummaryResponse
+import com.tradinggym.backend.dto.TurnNewsResponse
 import com.tradinggym.backend.dto.TurnSummaryResponse
 import com.tradinggym.backend.entity.SessionStat
+import com.tradinggym.backend.entity.SessionStatCategoryScore
 import com.tradinggym.backend.entity.SimulationSession
+import com.tradinggym.backend.entity.StockNews
 import com.tradinggym.backend.entity.Trade
 import com.tradinggym.backend.entity.TradeSide
 import com.tradinggym.backend.entity.TradeType
 import com.tradinggym.backend.entity.TurnAction
+import com.tradinggym.backend.entity.TurnLog
+import com.tradinggym.backend.repository.SessionStatCategoryScoreRepository
 import com.tradinggym.backend.repository.SessionStatRepository
 import com.tradinggym.backend.repository.SimulationSessionRepository
+import com.tradinggym.backend.repository.StockNewsRepository
 import com.tradinggym.backend.repository.TradeRepository
 import com.tradinggym.backend.repository.TurnLogRepository
 import com.tradinggym.backend.service.ai.SessionStatAnalyzer
@@ -34,7 +41,9 @@ class SessionSummaryService(
 	private val sessionRepository: SimulationSessionRepository,
 	private val turnLogRepository: TurnLogRepository,
 	private val tradeRepository: TradeRepository,
+	private val stockNewsRepository: StockNewsRepository,
 	private val sessionStatRepository: SessionStatRepository,
+	private val sessionStatCategoryScoreRepository: SessionStatCategoryScoreRepository,
 	private val sessionStatAnalyzer: SessionStatAnalyzer,
 ) {
 
@@ -44,7 +53,7 @@ class SessionSummaryService(
 		val trades = tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(sessionId)
 		val tradesByTurnLogId = trades.groupBy { requireNotNull(it.turnLog.id) }
 
-		val turns = turnLogs.map { turnLog ->
+		val turns = turnLogs.mapIndexed { index, turnLog ->
 			TurnSummaryResponse(
 				turnNumber = turnLog.turnNumber,
 				turnDate = turnLog.turnDate,
@@ -53,6 +62,7 @@ class SessionSummaryService(
 				portfolioValue = turnLog.portfolioValue,
 				borrowedAmount = turnLog.borrowedAmount,
 				trades = tradesByTurnLogId[turnLog.id].orEmpty().map { it.toSummary() },
+				news = newsForTurnPeriod(turnLogs, index).map { it.toTurnNewsResponse() },
 			)
 		}
 
@@ -93,8 +103,22 @@ class SessionSummaryService(
 		return sessionStatAnalyzer.analyze(summary)
 	}
 
+	// getSessionStats와 같은 저장-우선/라이브-계산 순서 — session_stat_categories에 저장돼
+	// 있으면 그걸 쓰고, 없으면 getSessionStats(8개 세부 지표)를 구해서 그 자리에서 평균만
+	// 냄(별도로 저장은 안 함, 영구 기록은 finalizeAndPersistStats에서만).
+	fun getSessionStatCategories(username: String, sessionId: UUID): List<SessionStatCategoryScoreResponse> {
+		requireOwnedSession(username, sessionId)
+		val saved = sessionStatCategoryScoreRepository.findBySessionIdOrderByCategoryKeyAsc(sessionId)
+		if (saved.isNotEmpty()) return saved.map { it.toResponse() }
+		val keyScores = getSessionStats(username, sessionId)
+		return SessionStatCategoryMapper.computeCategoryScores(keyScores.associate { it.statKey to it.scorePct })
+			.map { (category, scorePct) -> SessionStatCategoryScoreResponse(category, scorePct) }
+	}
+
 	// 세션 종료(completeSession) 시점에 한 번만 호출됨 — AI 채점을 그 자리에서 계산해서
 	// session_stats에 영구 저장함. 세션이 끝난 뒤엔 값이 안 바뀌니 한 번 저장해두면 충분.
+	// 8개 세부 지표를 저장한 김에 3개 성향 카테고리 평균도 같이 계산해서 session_stat_categories에
+	// 영구 저장함 — 세부 지표가 있어야 평균을 낼 수 있어서 항상 같은 트랜잭션에서 묶어서 처리.
 	@Transactional
 	fun finalizeAndPersistStats(username: String, sessionId: UUID): List<SessionStatScoreResponse> {
 		val session = requireOwnedSession(username, sessionId)
@@ -102,6 +126,12 @@ class SessionSummaryService(
 		val scores = sessionStatAnalyzer.analyze(summary)
 		sessionStatRepository.saveAll(
 			scores.map { SessionStat(session = session, statKey = it.statKey, scorePct = it.scorePct, note = it.note) },
+		)
+		val categoryScores = SessionStatCategoryMapper.computeCategoryScores(scores.associate { it.statKey to it.scorePct })
+		sessionStatCategoryScoreRepository.saveAll(
+			categoryScores.map { (category, scorePct) ->
+				SessionStatCategoryScore(session = session, categoryKey = category, scorePct = scorePct)
+			},
 		)
 		return scores
 	}
@@ -114,9 +144,28 @@ class SessionSummaryService(
 		}
 		return session
 	}
+
+	// turnLogs[index]가 열리기까지 건너뛴 기간(직전 턴 날짜 다음날 ~ 이 턴 날짜) 동안 있었던
+	// 뉴스 — 1턴째(index=0)는 건너뛴 구간이 없어서 그날 하루만 봄. SimulationService의
+	// 같은 이름 함수와 로직은 같지만, listTurnLogs와 getSessionSummary가 서로 다른
+	// 서비스라 각자 필요한 곳에서 이 작은 계산을 따로 둠.
+	private fun newsForTurnPeriod(turnLogs: List<TurnLog>, index: Int): List<StockNews> {
+		val rangeStart = if (index == 0) turnLogs[index].turnDate else turnLogs[index - 1].turnDate.plusDays(1)
+		return stockNewsRepository.findByTradeDateBetweenOrderByTradeDateAsc(rangeStart, turnLogs[index].turnDate)
+	}
 }
 
 private fun SessionStat.toResponse() = SessionStatScoreResponse(statKey = statKey, scorePct = scorePct, note = note)
+
+private fun SessionStatCategoryScore.toResponse() = SessionStatCategoryScoreResponse(categoryKey = categoryKey, scorePct = scorePct)
+
+private fun StockNews.toTurnNewsResponse() = TurnNewsResponse(
+	stockCode = stockCode,
+	headline = headline,
+	summary = summary,
+	source = source,
+	tradeDate = tradeDate,
+)
 
 private fun Trade.toSummary() = TradeSummaryResponse(
 	side = side,

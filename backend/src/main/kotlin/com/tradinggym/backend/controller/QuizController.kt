@@ -23,6 +23,12 @@ class QuizController(private val quizGenerationService: QuizGenerationService) {
 	fun generate(authentication: Authentication): PersonalizedQuizResponse =
 		quizGenerationService.generateForUser(authentication.name)
 
+	// generate와 달리 유저 전체 평균이 아니라 세션 하나의 스탯만 보고 약점 하나를 골라 문제를
+	// 만듦 — 모의투자가 끝난 직후 그 세션 결과로만 문제를 내주는 화면에서 씀.
+	@PostMapping("/generate-for-session/{sessionId}")
+	fun generateForSession(authentication: Authentication, @PathVariable sessionId: UUID): PersonalizedQuizResponse =
+		quizGenerationService.generateForSession(authentication.name, sessionId)
+
 	@GetMapping("/latest")
 	fun latest(authentication: Authentication): ResponseEntity<PersonalizedQuizResponse> {
 		val quiz = quizGenerationService.getLatest(authentication.name) ?: return ResponseEntity.noContent().build()

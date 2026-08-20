@@ -28,6 +28,13 @@ import {
 } from '../../lib/simulation-api';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { warningFor } from '../../lib/onboarding-copy';
+import {
+  generateQuizForSession,
+  submitQuizAnswer,
+  type PersonalizedQuizResponse,
+  type QuizAnswerResponse,
+} from '../../lib/quiz-api';
+import { SESSION_STAT_LABELS } from '../../lib/user-api';
 
 const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일주일', MONTH: '한달' };
 
@@ -167,9 +174,45 @@ export default function SimulationClient() {
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
   const [liquidationEvent, setLiquidationEvent] = useState<TradeResponse[] | null>(null);
   const [completedSummary, setCompletedSummary] = useState<
-    { startingCash: number; finalValue: number; returnPct: number; reason?: string } | null
+    { sessionId: string; startingCash: number; finalValue: number; returnPct: number; reason?: string } | null
   >(null);
   const [ending, setEnding] = useState(false);
+  // 세션이 끝나자마자 그 세션 "단독" 스탯 결과로만 문제 하나를 뽑아서 종료 화면에 바로 보여줌
+  // (오늘의 PT처럼 유저 전체 평균이 아니라 방금 끝난 세션 결과만 봄).
+  const [sessionQuiz, setSessionQuiz] = useState<PersonalizedQuizResponse | null>(null);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizError, setQuizError] = useState<string | null>(null);
+  const [quizSelectedOptionId, setQuizSelectedOptionId] = useState<string | null>(null);
+  const [quizResult, setQuizResult] = useState<QuizAnswerResponse | null>(null);
+  const [quizSubmitting, setQuizSubmitting] = useState(false);
+
+  async function loadSessionQuiz(sessionId: string) {
+    setQuizLoading(true);
+    setQuizError(null);
+    setSessionQuiz(null);
+    setQuizSelectedOptionId(null);
+    setQuizResult(null);
+    try {
+      setSessionQuiz(await generateQuizForSession(sessionId));
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : '문제를 만들지 못했어요');
+    } finally {
+      setQuizLoading(false);
+    }
+  }
+
+  async function handleQuizSelect(optionId: string) {
+    if (!sessionQuiz || quizResult || quizSubmitting) return;
+    setQuizSelectedOptionId(optionId);
+    setQuizSubmitting(true);
+    try {
+      setQuizResult(await submitQuizAnswer(sessionQuiz.id, optionId));
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : '채점하지 못했어요');
+    } finally {
+      setQuizSubmitting(false);
+    }
+  }
   const [profile, setProfile] = useState<InvestorProfileResponse | null>(null);
   const [ranking, setRanking] = useState<RankingEntryResponse[]>([]);
   const [needsLogin, setNeedsLogin] = useState(false);
@@ -410,11 +453,13 @@ export default function SimulationClient() {
       // COMPLETED로 종료해서 돌려줌 — 이때는 다음 턴으로 안 넘어가고 종료 화면을 보여줌.
       if (s.status === 'COMPLETED') {
         setCompletedSummary({
+          sessionId: s.id,
           startingCash: s.startingCash,
           finalValue: portfolioValue,
           returnPct: ((portfolioValue - s.startingCash) / s.startingCash) * 100,
           reason: '더 이상 진행할 수 있는 시세 데이터가 없어서 스파링이 자동으로 종료됐어요.',
         });
+        loadSessionQuiz(s.id);
         setSession(null);
         return;
       }
@@ -429,14 +474,17 @@ export default function SimulationClient() {
     setEnding(true);
     setActionResult(null);
     try {
+      const sessionId = session.id;
       const startingCash = session.startingCash;
       const finalValue = portfolioValue;
-      await completeSession(session.id);
+      await completeSession(sessionId);
       setCompletedSummary({
+        sessionId,
         startingCash,
         finalValue,
         returnPct: ((finalValue - startingCash) / startingCash) * 100,
       });
+      loadSessionQuiz(sessionId);
       setSession(null);
     } catch (e) {
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '세션을 종료하지 못했어요' });
@@ -447,6 +495,10 @@ export default function SimulationClient() {
 
   function handleRestart() {
     setCompletedSummary(null);
+    setSessionQuiz(null);
+    setQuizError(null);
+    setQuizSelectedOptionId(null);
+    setQuizResult(null);
     setNeedsStartDate(true);
     setStartDateChoice(availableDates[0] ?? '');
     setTrades([]);
@@ -495,7 +547,7 @@ export default function SimulationClient() {
   if (completedSummary) {
     const isGain = completedSummary.returnPct >= 0;
     return (
-      <div style={{ maxWidth: 420, margin: '80px auto', padding: '0 24px' }}>
+      <div style={{ maxWidth: 460, margin: '80px auto', padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div className="result-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링이 끝났어요</h2>
@@ -518,10 +570,88 @@ export default function SimulationClient() {
             시작 자산 {completedSummary.startingCash.toLocaleString()}원 → 최종 자산{' '}
             {Math.round(completedSummary.finalValue).toLocaleString()}원 (현금 + 보유 종목 평가액)
           </p>
-          <button onClick={handleRestart} className="btn btn-primary btn-block">
-            새 세션 시작하기
-          </button>
         </div>
+
+        {/* 이번 세션 단독 스탯으로 뽑은 문제 하나 — 유저 전체 평균이 아니라 방금 끝난
+            세션의 약점만 보고 만든 문제라 오늘의 PT랑 다름. */}
+        {quizLoading && (
+          <div className="result-card" style={{ padding: 24, textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+              이번 세션 기록을 보고 약점 지표를 찾아 문제를 만드는 중이에요...
+            </p>
+          </div>
+        )}
+
+        {!quizLoading && quizError && (
+          <div className="result-card" style={{ padding: 24, textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{quizError}</p>
+          </div>
+        )}
+
+        {!quizLoading && !quizError && sessionQuiz && (
+          <div
+            style={{
+              background: 'var(--white)',
+              border: '1px solid var(--line)',
+              borderRadius: 18,
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                이번 세션에서 뽑은 문제 · {SESSION_STAT_LABELS[sessionQuiz.targetStatKey].label}
+              </p>
+              <strong style={{ fontSize: 15 }}>{sessionQuiz.question}</strong>
+              {sessionQuiz.options.map((opt) => {
+                const isSelected = opt.id === quizSelectedOptionId;
+                const isCorrectAnswer = !!quizResult && opt.id === quizResult.correctOptionId;
+                const showState = !!quizResult;
+                const borderColor = !showState ? 'var(--line)' : isCorrectAnswer ? 'var(--green)' : isSelected ? 'var(--red)' : 'var(--line)';
+                const bgColor = !showState ? 'var(--white)' : isCorrectAnswer ? 'var(--green-chip)' : isSelected ? 'var(--red-chip)' : 'var(--white)';
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => handleQuizSelect(opt.id)}
+                    disabled={!!quizResult || quizSubmitting}
+                    style={{
+                      textAlign: 'left',
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: `1px solid ${borderColor}`,
+                      background: bgColor,
+                      color: showState && isCorrectAnswer ? 'var(--green)' : 'var(--ink)',
+                      fontWeight: showState && isCorrectAnswer ? 800 : 600,
+                      fontSize: 13,
+                      cursor: quizResult ? 'default' : 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                    {showState && isCorrectAnswer ? '  ✓' : ''}
+                  </button>
+                );
+              })}
+              {quizResult && (
+                <div
+                  style={{
+                    background: quizResult.correct ? 'var(--green)' : 'var(--red)',
+                    color: 'white',
+                    borderRadius: 12,
+                    padding: 14,
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {quizResult.correct ? '정답이에요! ' : '아쉬워요, 오답이에요. '}
+                  {quizResult.explanation}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <button onClick={handleRestart} className="btn btn-primary btn-block">
+          새 세션 시작하기
+        </button>
       </div>
     );
   }
@@ -698,7 +828,7 @@ export default function SimulationClient() {
               ))}
             </div>
 
-            <div className="result-card" style={{ minHeight: 0, padding: 16 }}>
+            <div className="result-card" style={{ minHeight: 0, padding: 16 }} data-knower-seat="">
               <h3 style={{ fontSize: 13, margin: '0 0 10px' }}>내 포트폴리오</h3>
               {holdingsList.length === 0 ? (
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>아직 보유 중인 종목이 없어요.</p>
@@ -920,7 +1050,7 @@ export default function SimulationClient() {
           </section>
 
           {/* right: ranking — 완료된 세션들 중 유저별 최고 수익률 기준 */}
-          <aside className="result-card" style={{ minHeight: 0, padding: 20 }}>
+          <aside className="result-card" style={{ minHeight: 0, padding: 20 }} data-knower-seat="" data-knower-swing-seat="">
             <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>이번 시즌 랭킹</h3>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--muted)' }}>
               스파링 시즌 1 · 수익률 기준

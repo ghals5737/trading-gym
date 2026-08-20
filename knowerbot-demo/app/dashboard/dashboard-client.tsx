@@ -4,14 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import { report, user } from '../../lib/mock-data';
-import { getMyAggregateStats, SESSION_STAT_LABELS, type AggregateStatResponse, type SessionStatKey } from '../../lib/user-api';
+import {
+  getMyAggregateStatCategories,
+  SESSION_STAT_CATEGORY_LABELS,
+  type AggregateStatCategoryResponse,
+  type SessionStatCategory,
+} from '../../lib/user-api';
 
-// tier-card의 3개 지표 자리에 넣을 session_stats 지표 — mock 문구(판단 정확도/공시
-// 확인율/리스크 관리)와 그대로 매칭되는 3개만 고름.
-const TIER_METRIC_KEYS: SessionStatKey[] = ['JUDGMENT_ACCURACY', 'DISCLOSURE_CHECK_RATE', 'RISK_MANAGEMENT_SCORE'];
+// tier-card의 3개 지표 자리 = 정확성/침착성/공격성 그대로.
+const TIER_CATEGORY_KEYS: SessionStatCategory[] = ['ACCURACY', 'COMPOSURE', 'AGGRESSIVENESS'];
 
 export default function DashboardClient() {
-  const [aggregateStats, setAggregateStats] = useState<AggregateStatResponse[] | null>(null);
+  const [aggregateStats, setAggregateStats] = useState<AggregateStatCategoryResponse[] | null>(null);
 
   useEffect(() => {
     let loggedInNow = false;
@@ -19,17 +23,17 @@ export default function DashboardClient() {
       loggedInNow = localStorage.getItem('kg_logged_in') === '1';
     } catch (e) {}
     if (!loggedInNow) return;
-    getMyAggregateStats()
+    getMyAggregateStatCategories()
       .then(setAggregateStats)
       .catch(() => setAggregateStats([]));
   }, []);
 
   // 세션이 하나도 없으면(신규 계정) mock 값으로 대체 — 빈 대시보드보다 예시가 나음.
-  const metrics = TIER_METRIC_KEYS.map((statKey) => {
-    const { label, suffix } = SESSION_STAT_LABELS[statKey];
-    const stat = aggregateStats?.find((s) => s.statKey === statKey);
+  const metrics = TIER_CATEGORY_KEYS.map((categoryKey) => {
+    const { label } = SESSION_STAT_CATEGORY_LABELS[categoryKey];
+    const stat = aggregateStats?.find((s) => s.categoryKey === categoryKey);
     const mockFallback = report.metrics.find((m) => m.label === label)?.value ?? '-';
-    return { label, value: stat ? `${stat.avgScorePct}${suffix}` : mockFallback };
+    return { label, value: stat ? `${stat.avgScorePct}점` : mockFallback };
   });
 
   return (
@@ -66,6 +70,8 @@ export default function DashboardClient() {
               href="/simulation"
               className="card"
               style={{ background: 'var(--green)', color: 'white', border: 0 }}
+              data-knower-seat=""
+              data-knower-swing-seat=""
             >
               <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
                 스파링 시즌 1 · 1 / 10턴
@@ -74,7 +80,7 @@ export default function DashboardClient() {
               <p style={{ color: 'rgba(255,255,255,0.9)' }}>지난번 멈춘 곳부터 바로 이어가요.</p>
               <span style={{ fontSize: 13, fontWeight: 800 }}>계속하기 →</span>
             </Link>
-            <Link href="/my" className="card">
+            <Link href="/my" className="card" data-knower-seat="">
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
                 지난주 대비 판단 정확도 +14%
               </span>
@@ -82,7 +88,7 @@ export default function DashboardClient() {
               <p>습관 진단과 성장 그래프를 확인해요.</p>
               <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)' }}>리포트 열기 →</span>
             </Link>
-            <Link href="/pt" className="card">
+            <Link href="/pt" className="card" data-knower-seat="">
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
                 반대매매, 내 주식이 강제로 팔리는 순간
               </span>

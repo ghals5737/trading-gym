@@ -47,3 +47,24 @@ export const SESSION_STAT_LABELS: Record<SessionStatKey, { label: string; suffix
   DIVERSIFICATION: { label: '분산투자', suffix: '점', desc: '한 종목에 몰빵하지 않는 정도' },
   GAMBLING_SIGNAL: { label: '도박성 신호 낮음', suffix: '점', desc: '손실 후 베팅을 키우지 않는 정도' },
 };
+
+// 위 8개 세부 지표를 묶은 3개 성향 카테고리 — 백엔드 SessionStatCategoryMapper와 동일한 매핑.
+export type SessionStatCategory = 'ACCURACY' | 'COMPOSURE' | 'AGGRESSIVENESS';
+
+export interface AggregateStatCategoryResponse {
+  categoryKey: SessionStatCategory;
+  avgScorePct: number;
+  sessionCount: number;
+}
+
+// session_stat_categories를 유저 단위로 묶어 카테고리별 평균 낸 값 — getMyAggregateStats의
+// 3개 성향 카테고리 버전.
+export function getMyAggregateStatCategories(): Promise<AggregateStatCategoryResponse[]> {
+  return authFetch<AggregateStatCategoryResponse[]>('/api/users/me/aggregate-stat-categories');
+}
+
+export const SESSION_STAT_CATEGORY_LABELS: Record<SessionStatCategory, { label: string; desc: string }> = {
+  ACCURACY: { label: '정확성', desc: '근거를 갖고, 편향 없이 판단했는지' },
+  COMPOSURE: { label: '침착성', desc: '감정(패닉·조급함)에 휘둘리지 않았는지' },
+  AGGRESSIVENESS: { label: '공격성', desc: '위험을 얼마나 크게·집중해서 짊어졌는지' },
+};

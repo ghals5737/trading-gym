@@ -1,5 +1,6 @@
 package com.tradinggym.backend.dto
 
+import com.tradinggym.backend.entity.SessionStatCategory
 import com.tradinggym.backend.entity.SessionStatKey
 
 data class ProductTourStatusResponse(
@@ -11,6 +12,14 @@ data class ProductTourStatusResponse(
 // 안에서 소스만 추가하면 됨(전용 캐시 테이블 없이 매 요청마다 라이브로 계산).
 data class AggregateStatResponse(
 	val statKey: SessionStatKey,
+	val avgScorePct: Int,
+	val sessionCount: Int,
+)
+
+// session_stat_categories를 유저 단위로 묶어 카테고리별로 평균 낸 값 — AggregateStatResponse의
+// 3개 성향 카테고리 버전.
+data class AggregateStatCategoryResponse(
+	val categoryKey: SessionStatCategory,
 	val avgScorePct: Int,
 	val sessionCount: Int,
 )

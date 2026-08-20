@@ -5,6 +5,7 @@ import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.QuoteResponse
 import com.tradinggym.backend.dto.SessionResponse
+import com.tradinggym.backend.dto.SessionStatCategoryScoreResponse
 import com.tradinggym.backend.dto.SessionStatScoreResponse
 import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
@@ -128,4 +129,11 @@ class SimulationController(
 	@GetMapping("/{sessionId}/stats")
 	fun getSessionStats(authentication: Authentication, @PathVariable sessionId: UUID): List<SessionStatScoreResponse> =
 		sessionSummaryService.getSessionStats(authentication.name, sessionId)
+
+	// 위 8개 세부 지표를 정확성/침착성/공격성 3개 성향으로 묶어 평균 낸 것 — SessionStatCategoryMapper 참고.
+	@GetMapping("/{sessionId}/stat-categories")
+	fun getSessionStatCategories(
+		authentication: Authentication,
+		@PathVariable sessionId: UUID,
+	): List<SessionStatCategoryScoreResponse> = sessionSummaryService.getSessionStatCategories(authentication.name, sessionId)
 }

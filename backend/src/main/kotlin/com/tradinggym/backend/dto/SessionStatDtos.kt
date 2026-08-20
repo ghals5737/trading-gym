@@ -1,5 +1,6 @@
 package com.tradinggym.backend.dto
 
+import com.tradinggym.backend.entity.SessionStatCategory
 import com.tradinggym.backend.entity.SessionStatKey
 
 // SessionSummaryResponse(턴별 매매 + reasonText 원문)를 통째로 AI에 넘겨서 받은 8개 지표
@@ -9,4 +10,11 @@ data class SessionStatScoreResponse(
 	val statKey: SessionStatKey,
 	val scorePct: Int,
 	val note: String,
+)
+
+// 8개 세부 지표를 SessionStatCategoryMapper 매핑대로 묶어 평균 낸 3개 성향 점수 —
+// note 없음(평균값이라 문장 근거가 없음, 근거는 세부 지표 쪽 note에서 확인).
+data class SessionStatCategoryScoreResponse(
+	val categoryKey: SessionStatCategory,
+	val scorePct: Int,
 )

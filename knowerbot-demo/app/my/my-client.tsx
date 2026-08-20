@@ -4,10 +4,16 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import LoginButton from '../../components/LoginButton';
+import StatTriangleChart from '../../components/StatTriangleChart';
 import { aiCharacter, user } from '../../lib/mock-data';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { RISK_COPY, KNOWLEDGE_COPY, INFO_HABIT_COPY, headlineFor, warningFor, courseFor } from '../../lib/onboarding-copy';
-import { getMyAggregateStats, SESSION_STAT_LABELS, type AggregateStatResponse, type SessionStatKey } from '../../lib/user-api';
+import {
+  getMyAggregateStatCategories,
+  SESSION_STAT_CATEGORY_LABELS,
+  type AggregateStatCategoryResponse,
+  type SessionStatCategory,
+} from '../../lib/user-api';
 
 declare global {
   interface Window {
@@ -309,22 +315,22 @@ function DiagnosisTab() {
       )}
 
       <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">리스크 성향</span>
           <h3>{risk.label}</h3>
           <p>{risk.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">투자 지식</span>
           <h3>{knowledge.label}</h3>
           <p>{knowledge.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">정보 습관</span>
           <h3>{infoHabit.label}</h3>
           <p>{infoHabit.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">추천</span>
           <h3>{course}</h3>
           <p>{courseDetail}</p>
@@ -335,7 +341,7 @@ function DiagnosisTab() {
         <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
           {new Date(profile.createdAt).toLocaleDateString('ko-KR')}에 진단한 결과예요.
         </p>
-        <Link href="/onboarding?retake=1" className="btn btn-secondary btn-sm">
+        <Link href="/onboarding?retake=1" className="btn btn-secondary btn-sm" data-knower-swing-seat="">
           다시 진단받기
         </Link>
       </div>
@@ -343,17 +349,18 @@ function DiagnosisTab() {
   );
 }
 
-const STAT_KEYS = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
+const STAT_CATEGORY_KEYS = Object.keys(SESSION_STAT_CATEGORY_LABELS) as SessionStatCategory[];
 
-// 모의투자 세션을 마칠 때마다 AI가 채점해 쌓이는 8개 지표 — 사전조사 결과(진단 탭)와
-// 다르게 세션이 없으면 보여줄 게 없어서(mock 폴백 없음), 빈 상태를 그대로 안내함.
+// 모의투자 세션을 마칠 때마다 AI가 채점하는 8개 세부 지표를 정확성/침착성/공격성 3개
+// 성향으로 묶어 평균 낸 값 — 사전조사 결과(진단 탭)와 다르게 세션이 없으면 보여줄 게
+// 없어서(mock 폴백 없음), 빈 상태를 그대로 안내함.
 function StatsTab() {
-  const [stats, setStats] = useState<AggregateStatResponse[] | null>(null);
+  const [stats, setStats] = useState<AggregateStatCategoryResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getMyAggregateStats()
+    getMyAggregateStatCategories()
       .then(setStats)
       .catch((e) => setError(e instanceof Error ? e.message : '스탯을 불러오지 못했어요'))
       .finally(() => setLoading(false));
@@ -377,20 +384,28 @@ function StatsTab() {
   }
 
   const sessionCount = Math.max(...stats.map((s) => s.sessionCount));
+  const chartPoints = STAT_CATEGORY_KEYS.map((key) => ({
+    key,
+    label: SESSION_STAT_CATEGORY_LABELS[key].label,
+    value: stats.find((s) => s.categoryKey === key)?.avgScorePct ?? 0,
+  }));
 
   return (
     <>
       <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
-        완료한 세션 {sessionCount}개를 기준으로 지표별 평균을 냈어요. 세션을 더 진행하면 계속 업데이트돼요.
+        완료한 세션 {sessionCount}개를 기준으로 성향별 평균을 냈어요. 세션을 더 진행하면 계속 업데이트돼요.
       </p>
-      <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {STAT_KEYS.map((key) => {
-          const { label, suffix, desc } = SESSION_STAT_LABELS[key];
-          const stat = stats.find((s) => s.statKey === key);
+      <div className="result-card" style={{ padding: '20px 12px' }}>
+        <StatTriangleChart points={chartPoints} />
+      </div>
+      <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+        {STAT_CATEGORY_KEYS.map((key) => {
+          const { label, desc } = SESSION_STAT_CATEGORY_LABELS[key];
+          const stat = stats.find((s) => s.categoryKey === key);
           return (
-            <div className="result-card" key={key}>
+            <div className="result-card" key={key} data-knower-seat="">
               <span className="result-tag">{label}</span>
-              <h3>{stat ? `${stat.avgScorePct}${suffix}` : '-'}</h3>
+              <h3>{stat ? `${stat.avgScorePct}점` : '-'}</h3>
               <p>{desc}</p>
             </div>
           );
