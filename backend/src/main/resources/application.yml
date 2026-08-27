@@ -2,11 +2,11 @@ spring:
   application:
     name: trading-gym-backend
   datasource:
-    # 로컬 Postgres(brew, trust auth) 기준 기본값 — 회의 결정: 로컬 DB 사용.
-    # trading_gym_rag 하나에 앱 테이블 + RAG 테이블(edu_*)이 같이 있음(자료실/추천이 edu_*를 직접 조회).
-    # 다른 환경에서는 DB_URL/DB_USERNAME/DB_PASSWORD로 덮어쓸 것.
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/trading_gym_rag}
-    username: ${DB_USERNAME:hbrc}
+    # 개발 DB = RDS(tg) — 2026-08-25 전환. 앱 테이블 + RAG 테이블(edu_*)이 한 DB에 같이 있음.
+    # 비밀번호는 절대 여기 커밋하지 말 것 — 저장소 루트 .env(gitignore됨)의 DB_PASSWORD로 주입.
+    # 로컬 DB로 돌리려면 DB_URL/DB_USERNAME/DB_PASSWORD를 로컬 값으로 덮어쓰면 됨.
+    url: ${DB_URL:jdbc:postgresql://snsb-dev.ccniq24yveck.ap-northeast-2.rds.amazonaws.com:5432/tg}
+    username: ${DB_USERNAME:hrbc}
     password: ${DB_PASSWORD:}
   jpa:
     open-in-view: false
