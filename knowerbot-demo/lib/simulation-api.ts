@@ -11,6 +11,12 @@ export interface SessionResponse {
   startingCash: number;
   currentCash: number;
   borrowedAmount: number;
+  // 미수금 상환 기한 안내용 — 미수금이 없으면 null/false.
+  // debtDeadlineTurn = 미수 발생 턴 + 10. 그 턴이 끝날 때까지 못 갚으면 debtOverdue가 켜짐.
+  debtOpenedTurnNumber: number | null;
+  debtDeadlineTurn: number | null;
+  debtOverdue: boolean;
+  startTurnDate: string; // 시뮬레이션 시작 거래일 — 기간 진행률(프로그래스바)의 시작점
   currentTurnDate: string;
   targetEndDate: string;
   turnCount: number;
@@ -49,6 +55,19 @@ export interface StockHistoryResponse {
   points: PricePoint[];
 }
 
+// DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 최신 3건. 공시는 오래돼도
+// 유효한 정보라(분기보고서 등) 뉴스와 달리 lookback 제한 없음. 없으면 items가 빈 배열.
+export interface StockDisclosureItemResponse {
+  title: string;
+  summary: string;
+  disclosedDate: string;
+}
+
+export interface StockDisclosureResponse {
+  stockCode: string;
+  items: StockDisclosureItemResponse[];
+}
+
 // stockCode/stockName/orderType/quantity/day*Price는 side='HOLD'(관망)면 전부 null.
 export interface TradeResponse {
   id: string;
@@ -73,13 +92,11 @@ export interface TradeResponse {
   createdAt: string;
 }
 
+// 지정가 주문은 회의 결정으로 제거됨 — 항상 시장가(그날 시가) 체결.
+// 미수(신용)도 요청 필드가 아님 — 현금보다 큰 매수면 서버가 부족분을 자동으로 미수로 잡음.
 export interface CreateTradeRequest {
   stockCode: string;
   side: TradeSide;
-  orderType: TradeOrderType;
-  limitPrice?: number;
-  isCredit?: boolean;
-  leverageRatio?: number;
   quantity: number;
   viewedDisclosure?: boolean;
   reasonText: string;
@@ -135,6 +152,10 @@ export function getStockNews(sessionId: string, stockCode: string): Promise<Stoc
   return request<StockNewsResponse | null>(`/api/sessions/${sessionId}/stocks/${stockCode}/news`);
 }
 
+export function getStockDisclosures(sessionId: string, stockCode: string): Promise<StockDisclosureResponse> {
+  return request<StockDisclosureResponse>(`/api/sessions/${sessionId}/stocks/${stockCode}/disclosures`);
+}
+
 export function recordTrade(sessionId: string, req: CreateTradeRequest): Promise<TradeResponse> {
   return request<TradeResponse>(`/api/sessions/${sessionId}/trades`, {
     method: 'POST',
@@ -162,4 +183,49 @@ export function completeSession(sessionId: string): Promise<SessionResponse> {
 // 관망한 턴까지 포함한 턴별 타임라인 — AI 종합 분석/리포트용 원자료.
 export function listTurnLogs(sessionId: string): Promise<TurnLogResponse[]> {
   return request<TurnLogResponse[]>(`/api/sessions/${sessionId}/turn-logs`);
+}
+
+// ---- 미수금 갚기 / AI 채점 / 모의고사 기록 ----
+
+// "미수금 갚기" — 현금부터 갚고, 모자라면 보유 종목을 필요한 만큼만 시가 매도해서 상환.
+export function repayDebt(sessionId: string): Promise<SessionResponse> {
+  return request<SessionResponse>(`/api/sessions/${sessionId}/repay-debt`, { method: 'POST' });
+}
+
+export type SessionStatKey =
+  | 'JUDGMENT_ACCURACY'
+  | 'DISCLOSURE_CHECK_RATE'
+  | 'RISK_MANAGEMENT_SCORE'
+  | 'IMPULSIVE_TRADING'
+  | 'LOSS_AVERSION'
+  | 'CONFIRMATION_BIAS'
+  | 'DIVERSIFICATION'
+  | 'GAMBLING_SIGNAL';
+
+export interface SessionStatScoreResponse {
+  statKey: SessionStatKey;
+  scorePct: number;
+  note: string; // AI가 채점하며 남긴 판단근거 한 문장
+}
+
+// 세션 하나의 AI 채점 8개 지표 — 종료된 세션은 저장값, 진행 중이면 즉석 계산.
+export function getSessionStats(sessionId: string): Promise<SessionStatScoreResponse[]> {
+  return request<SessionStatScoreResponse[]>(`/api/sessions/${sessionId}/stats`);
+}
+
+// 마이페이지 "모의고사 기록" — 완료된 세션들의 결과 요약 + AI 채점, 최신순.
+export interface SessionHistoryItemResponse {
+  sessionId: string;
+  startTurnDate: string;
+  lastTurnDate: string;
+  turnCount: number;
+  startingCash: number;
+  finalPortfolioValue: number;
+  returnPct: number;
+  endedAt: string | null;
+  stats: SessionStatScoreResponse[];
+}
+
+export function getSessionHistory(): Promise<SessionHistoryItemResponse[]> {
+  return request<SessionHistoryItemResponse[]>('/api/sessions/history');
 }

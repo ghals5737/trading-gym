@@ -23,6 +23,10 @@ object SessionStatAnalysisPrompt {
 			(매수 ${summary.buyCount}/매도 ${summary.sellCount}), 관망 턴 ${summary.holdTurnCount}회,
 			반대매매 ${summary.forcedLiquidationCount}회, 신용거래 ${summary.creditTradeCount}건,
 			거래한 종목 수 ${summary.uniqueStockCount}개, 매수 중 공시확인 ${summary.disclosureCheckedBuyCount}건.
+			미수금(신용매수 대출): ${if (summary.debtOverdue) "상환 기한(발생 후 10턴)을 넘김 — 규칙 위반" else "기한 초과 없음"},
+			세션 종료 시점 미상환 잔액 ${summary.unpaidDebtAtEnd}원${if (summary.unpaidDebtAtEnd.signum() > 0) " (빚을 안 갚고 세션을 끝냄)" else ""}.
+			미수금 기한 초과나 미상환 잔액이 있으면 RISK_MANAGEMENT_SCORE와 GAMBLING_SIGNAL을
+			뚜렷하게 감점하고 그 이유에 명시해.
 
 			턴별 기록:
 			$turnLines
@@ -80,13 +84,14 @@ object SessionStatAnalysisPrompt {
 		val disclosureRate = if (summary.buyCount == 0) 50 else
 			(summary.disclosureCheckedBuyCount * 100 / summary.buyCount)
 		val diversification = (summary.uniqueStockCount * 25).coerceAtMost(100)
-		val riskManagement = (100 - summary.forcedLiquidationCount * 40).coerceIn(0, 100)
-		val gamblingSignal = (100 - summary.forcedLiquidationCount * 30 - summary.creditTradeCount * 5).coerceIn(0, 100)
+		val debtPenalty = (if (summary.debtOverdue) 30 else 0) + (if (summary.unpaidDebtAtEnd.signum() > 0) 20 else 0)
+		val riskManagement = (100 - summary.forcedLiquidationCount * 40 - debtPenalty).coerceIn(0, 100)
+		val gamblingSignal = (100 - summary.forcedLiquidationCount * 30 - summary.creditTradeCount * 5 - debtPenalty).coerceIn(0, 100)
 
 		return listOf(
 			SessionStatScoreResponse(SessionStatKey.JUDGMENT_ACCURACY, 50, "지금은 AI 분석을 만들지 못했어요"),
 			SessionStatScoreResponse(SessionStatKey.DISCLOSURE_CHECK_RATE, disclosureRate, "매수 ${summary.buyCount}건 중 ${summary.disclosureCheckedBuyCount}건 공시 확인"),
-			SessionStatScoreResponse(SessionStatKey.RISK_MANAGEMENT_SCORE, riskManagement, "반대매매 ${summary.forcedLiquidationCount}회"),
+			SessionStatScoreResponse(SessionStatKey.RISK_MANAGEMENT_SCORE, riskManagement, "반대매매 ${summary.forcedLiquidationCount}회" + (if (summary.debtOverdue) " · 미수금 상환 기한 초과" else "")),
 			SessionStatScoreResponse(SessionStatKey.IMPULSIVE_TRADING, 50, "지금은 AI 분석을 만들지 못했어요"),
 			SessionStatScoreResponse(SessionStatKey.LOSS_AVERSION, 50, "지금은 AI 분석을 만들지 못했어요"),
 			SessionStatScoreResponse(SessionStatKey.CONFIRMATION_BIAS, 50, "지금은 AI 분석을 만들지 못했어요"),

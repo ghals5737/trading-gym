@@ -52,19 +52,36 @@ class SimulationSession(
 	@GeneratedValue(strategy = GenerationType.UUID)
 	var id: UUID? = null
 
+	// 시뮬레이션 시작 거래일 — currentTurnDate는 턴이 넘어가면 바뀌어서, "기간이 얼마나
+	// 남았는지" 진행률을 그리려면 시작점을 따로 들고 있어야 함. 예전 세션(컬럼 추가 전)은
+	// null일 수 있어 nullable — 응답 변환에서 currentTurnDate로 대체함.
+	@Column(name = "start_turn_date")
+	var startTurnDate: LocalDate? = null
+
 	@Column(name = "started_at", nullable = false, updatable = false)
 	var startedAt: Instant = Instant.now()
 
 	@Column(name = "ended_at")
 	var endedAt: Instant? = null
 
-	// 세션 생성 시점이 1턴째 — advanceTurn 성공할 때마다 1씩 늘어남. MAX_TURNS(20) 도달하면
+	// 세션 생성 시점이 1턴째 — advanceTurn 성공할 때마다 1씩 늘어남. MAX_TURNS(10) 도달하면
 	// advanceTurn이 거부하고 시뮬레이션 종료를 유도함.
 	@Column(name = "turn_count", nullable = false)
 	var turnCount: Int = 1
 
 	// 신용매수로 빌린 돈의 총합(포지션별이 아니라 계좌 전체 합산 — 단순화).
-	// 담보비율 = (현금 + 보유종목 평가액) / borrowedAmount. 상환은 반대매매로만 됨(수동 상환 기능 없음).
+	// 담보비율 = (현금 + 보유종목 평가액) / borrowedAmount.
+	// 상환은 매도 대금 자동 상환(recordTrade의 SELL) 또는 반대매매로 됨.
 	@Column(name = "borrowed_amount", nullable = false)
 	var borrowedAmount: BigDecimal = BigDecimal.ZERO
+
+	// 미수금(빌린 돈)이 0 → 양수로 처음 넘어간 턴 번호. 전액 상환되면 다시 null.
+	// DEBT_REPAY_TURN_LIMIT(10턴) 안에 못 갚으면 debtOverdue가 켜짐 — 상환 기한 경고의 기준점.
+	@Column(name = "debt_opened_turn_number")
+	var debtOpenedTurnNumber: Int? = null
+
+	// 미수금을 기한(10턴) 안에 못 갚은 적이 있는 세션 표시 — 한 번 켜지면 세션 끝까지 유지.
+	// AI 스탯 채점(SessionStatAnalyzer)에 "부정적 반영" 근거로 넘어감.
+	@Column(name = "debt_overdue", nullable = false)
+	var debtOverdue: Boolean = false
 }

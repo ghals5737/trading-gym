@@ -294,9 +294,20 @@ if (isLoggedIn && window.location.pathname !== '/onboarding') {
 // 자동으로 다가와서 채팅을 열게 함 — 처음 방문이든 "다시 진단받기"로 재방문이든 매번
 // 트리거함(kg_seen_intro_chat 여부와 무관). 모델 로딩 시간을 감안해 살짝 지연.
 if (isLoggedIn && window.location.pathname === '/onboarding') {
-  window.setTimeout(() => {
-    if (isLoggedIn) enterChatMode();
-  }, 1500);
+  // 모델 로딩이 1.5초보다 오래 걸릴 수 있어서 고정 지연 대신 준비될 때까지 재시도 —
+  // 로딩 전에 enterChatMode를 걸어두면 위 Promise.all 가드가 상태를 지켜주지만,
+  // 애니메이션이 아직 없으면 다가오는 모션 자체가 어색해서 준비 후에 부름.
+  let onboardingApproachTries = 0;
+  const tryApproach = () => {
+    if (!isLoggedIn) return;
+    if (actions.idle || actions.walking) {
+      enterChatMode();
+      return;
+    }
+    onboardingApproachTries += 1;
+    if (onboardingApproachTries < 40) window.setTimeout(tryApproach, 500); // 최대 ~20초
+  };
+  window.setTimeout(tryApproach, 1200);
 }
 let pendingStartAfterLogin = false;
 let autoChatTimer = 0;
@@ -313,6 +324,10 @@ const surveyState = {
   active: false,
   questions: [],
   index: 0,
+  // 나이대 질문(설문 맨 끝 1문항) — 점수 문항이 아니라 서버 questions에 없고,
+  // 여기서만 관리함. "내 또래 대비 투자성향" 비교(마이페이지)에 쓰임.
+  askingAge: false,
+  ageAsked: false,
 };
 
 const textureLoader = new THREE.TextureLoader();
@@ -697,6 +712,11 @@ function handleChatSubmit(message) {
     resolve(text);
     return;
   }
+  if (surveyState.askingAge) {
+    addChatMessage('user', text);
+    submitAgeBandAnswer(text);
+    return;
+  }
   if (surveyState.active) {
     submitOnboardingAnswer(text);
     return;
@@ -856,6 +876,10 @@ function startOnboardingSurvey(retake) {
 function askNextOnboardingQuestion() {
   const question = surveyState.questions[surveyState.index];
   if (!question) {
+    if (!surveyState.ageAsked) {
+      askAgeBandQuestion();
+      return;
+    }
     finishOnboardingSurvey();
     return;
   }
@@ -864,6 +888,62 @@ function askNextOnboardingQuestion() {
     chatInputEl.disabled = false;
     chatInputEl.focus();
   }
+}
+
+// 설문 맨 끝의 나이대 질문 — 이미 저장돼 있으면(재진단 등) 건너뛰고 바로 결과 분석으로.
+// 자유 텍스트에서 나이대만 뽑고, 못 알아들으면 다시 묻되 "건너뛰기"라고 하면 넘어감
+// (마이페이지에서 나중에 입력할 수 있음).
+function askAgeBandQuestion() {
+  surveyState.ageAsked = true;
+  authFetch(`${API_BASE}/api/users/me/age-band`, {})
+    .then((res) => (res.status === 204 ? { ageBand: null } : res.json()))
+    .then((data) => {
+      if (data && data.ageBand) {
+        finishOnboardingSurvey();
+        return;
+      }
+      surveyState.askingAge = true;
+      addChatMessage('bot', '마지막으로 하나만 더요 — 나이대가 어떻게 되세요? (예: 20대) 또래와 투자성향을 비교해드리는 데만 써요. 알려주기 싫으면 "건너뛰기"라고 해주세요.');
+      if (chatInputEl) {
+        chatInputEl.disabled = false;
+        chatInputEl.focus();
+      }
+    })
+    .catch(() => finishOnboardingSurvey());
+}
+
+function parseAgeBand(text) {
+  if (/10|십대|틴/.test(text)) return 'TEENS';
+  if (/2[0-9]|20|스물|이십/.test(text)) return 'TWENTIES';
+  if (/3[0-9]|30|서른|삼십/.test(text)) return 'THIRTIES';
+  if (/4[0-9]|40|마흔|사십/.test(text)) return 'FORTIES';
+  if (/5[0-9]|6[0-9]|7[0-9]|50|쉰|오십|육십|예순/.test(text)) return 'FIFTIES_PLUS';
+  return null;
+}
+
+function submitAgeBandAnswer(text) {
+  if (/건너|스킵|싫/.test(text)) {
+    surveyState.askingAge = false;
+    addChatMessage('bot', '알겠어요 — 나중에 마이페이지에서 언제든 알려줄 수 있어요.');
+    window.setTimeout(finishOnboardingSurvey, 500);
+    return;
+  }
+  const ageBand = parseAgeBand(text);
+  if (!ageBand) {
+    addChatMessage('bot', '나이대를 잘 못 알아들었어요. "20대"처럼 말해주시거나 "건너뛰기"라고 해주세요.');
+    return;
+  }
+  if (chatInputEl) chatInputEl.disabled = true;
+  authFetch(`${API_BASE}/api/users/me/age-band`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ageBand }),
+  })
+    .catch(() => {}) // 실패해도 설문 자체는 계속 — 마이페이지에서 다시 입력 가능
+    .finally(() => {
+      surveyState.askingAge = false;
+      window.setTimeout(finishOnboardingSurvey, 400);
+    });
 }
 
 // 대화(원문 6개)는 이미 서버에 다 저장돼있어서 body 없이 호출 — 서버가 그 전체를
@@ -1229,12 +1309,13 @@ new GLTFLoader().load(
 
     Promise.all(animationLoads).then(() => {
       setAction('idle', 0);
-      if (isLoggedIn || pendingStartAfterLogin) {
+      if (pendingLoginPrompt || botState.mode === 'approachChat' || botState.mode === 'chatIdle') {
+        // 모델 로딩 중에 이미 다가오라고 지시돼 있으면(로그인 전 knowerbotRequireLogin,
+        // 또는 /onboarding의 자동 설문 트리거) 그 상태를 덮어쓰지 않음 — 로그인 여부와
+        // 무관하게 여기서 startPostLoginSwim으로 갈아타면 다가오다 말고 배회로 돌아가서
+        // 온보딩 채팅이 영영 안 열리는 문제가 있었음.
+      } else if (isLoggedIn || pendingStartAfterLogin) {
         startPostLoginSwim();
-      } else if (pendingLoginPrompt || botState.mode === 'approachChat' || botState.mode === 'chatIdle') {
-        // 모델 로딩 중에 knowerbotRequireLogin()이 이미 다가오라고 지시해놨으면
-        // (로그인 안 한 채로 /simulation, /my 등에 온 경우) 그 상태를 덮어쓰지 않음 —
-        // 안 그러면 로딩이 늦게 끝났을 때 다가오다 말고 도로 'ready'로 얼어붙음.
       } else {
         botState.mode = 'ready';
       }

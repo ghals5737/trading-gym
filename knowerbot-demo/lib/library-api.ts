@@ -36,3 +36,28 @@ export function getLibraryDocuments(): Promise<LibraryDocumentResponse[]> {
 export function getLibraryDocument(id: number, offset: number, limit: number): Promise<LibraryDocumentDetailResponse> {
   return authFetch<LibraryDocumentDetailResponse>(`/api/library/documents/${id}?offset=${offset}&limit=${limit}`);
 }
+
+// ---- 약점 기반 추천 (RAG) ----
+
+export interface LibraryRecommendationItemResponse {
+  documentId: number | null; // 자료실 문서와 매칭되면 /library/[id]로 바로 이동 가능
+  title: string;
+  orgName: string | null;
+  pageStart: number | null;
+  pageEnd: number | null;
+  excerpt: string;
+}
+
+export interface LibraryRecommendationsResponse {
+  targetStatKey: string;
+  targetStatLabel: string;
+  targetStatScore: number;
+  reason: string;
+  items: LibraryRecommendationItemResponse[];
+}
+
+// 내 스탯 중 가장 약한 지표를 RAG(edu_chunks 벡터 검색)로 찾아 추천 — 완료한 모의고사가
+// 없거나 검색 결과가 없으면 204 → null(추천 섹션을 숨김).
+export function getLibraryRecommendations(): Promise<LibraryRecommendationsResponse | null> {
+  return authFetch<LibraryRecommendationsResponse | null>('/api/library/recommendations');
+}

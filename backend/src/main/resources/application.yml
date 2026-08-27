@@ -2,9 +2,11 @@ spring:
   application:
     name: trading-gym-backend
   datasource:
-    # 로컬 Postgres(brew, trust auth) 기준 기본값. 다른 환경에서는 DB_USERNAME/DB_PASSWORD로 덮어쓸 것.
-    url: jdbc:postgresql://localhost:5432/trading_gym_dev
-    username: ${DB_USERNAME:ksjhbrc}
+    # 로컬 Postgres(brew, trust auth) 기준 기본값 — 회의 결정: 로컬 DB 사용.
+    # trading_gym_rag 하나에 앱 테이블 + RAG 테이블(edu_*)이 같이 있음(자료실/추천이 edu_*를 직접 조회).
+    # 다른 환경에서는 DB_URL/DB_USERNAME/DB_PASSWORD로 덮어쓸 것.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/trading_gym_rag}
+    username: ${DB_USERNAME:hbrc}
     password: ${DB_PASSWORD:}
   jpa:
     open-in-view: false
@@ -22,6 +24,12 @@ jwt:
   secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-before-any-real-deployment-please}
   access-token-validity-seconds: 900       # 15분
   refresh-token-validity-seconds: 1209600  # 14일
+
+# 오늘의 PT 퀴즈 생성 프롬프트 버전 — v1(개념 확인형) | v2(실전 시나리오형).
+# v2로 확정(2026-08-25) — 시나리오형이 진단된 나쁜 습관과 직접 대응돼 행동 교정에 유리.
+# v1 프롬프트는 QuizGenerationPrompt.kt에 남아있어 언제든 되돌릴 수 있음.
+quiz:
+  prompt-version: ${QUIZ_PROMPT_VERSION:v2}
 
 ai:
   # stub(기본값, 키 불필요) | anthropic | openai | gemini | codex-cli — 어댑터 선택.

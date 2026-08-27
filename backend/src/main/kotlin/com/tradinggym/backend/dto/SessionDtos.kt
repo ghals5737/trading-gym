@@ -30,6 +30,12 @@ data class SessionResponse(
 	val startingCash: BigDecimal,
 	val currentCash: BigDecimal,
 	val borrowedAmount: BigDecimal,
+	// 미수금 상환 기한 안내용 — 미수금이 없으면 셋 다 null/false.
+	// debtDeadlineTurn = 미수 발생 턴 + 10. 그 턴이 끝날 때까지 못 갚으면 debtOverdue가 켜짐.
+	val debtOpenedTurnNumber: Int?,
+	val debtDeadlineTurn: Int?,
+	val debtOverdue: Boolean,
+	val startTurnDate: LocalDate, // 시뮬레이션 시작 거래일 — 기간 진행률(프로그래스바)의 시작점
 	val currentTurnDate: LocalDate,
 	val targetEndDate: LocalDate,
 	val turnCount: Int,

@@ -27,8 +27,31 @@ export type SessionStatKey =
 
 export interface AggregateStatResponse {
   statKey: SessionStatKey;
-  avgScorePct: number;
-  sessionCount: number;
+  avgScorePct: number; // 모의고사 채점 + 퀴즈 결과를 합친 평균
+  sessionCount: number; // 이 지표가 채점된 모의고사 세션 수
+  quizCount: number; // 이 지표를 겨냥한 퀴즈 중 답을 제출한 개수
+  latestNote: string; // 가장 최근 채점의 판단근거(AI가 쓴 한 문장)
+}
+
+// ---- 3개 대분류 개요 (정확성/침착성/공격성) ----
+
+export interface StatCategoryScoreResponse {
+  category: 'ACCURACY' | 'COMPOSURE' | 'AGGRESSIVENESS';
+  label: string;
+  scorePct: number;
+  description: string;
+  higherIsBetter: boolean; // false(공격성)면 좋고 나쁨이 아니라 "성향" — 중립 색으로 그림
+}
+
+export interface StatOverviewResponse {
+  summaryText: string;
+  categories: StatCategoryScoreResponse[];
+  stats: AggregateStatResponse[];
+}
+
+// 데이터가 하나도 없으면 204 → null.
+export function getMyStatOverview(): Promise<StatOverviewResponse | null> {
+  return authFetch<StatOverviewResponse | null>('/api/users/me/stat-overview');
 }
 
 // session_stats(모의투자)를 유저 단위로 묶어 지표별 평균 낸 값 — 지금은 세션만 소스지만,
@@ -47,3 +70,45 @@ export const SESSION_STAT_LABELS: Record<SessionStatKey, { label: string; suffix
   DIVERSIFICATION: { label: '분산투자', suffix: '점', desc: '한 종목에 몰빵하지 않는 정도' },
   GAMBLING_SIGNAL: { label: '도박성 신호 낮음', suffix: '점', desc: '손실 후 베팅을 키우지 않는 정도' },
 };
+
+// ---- 나이대 · 또래 비교 ----
+
+export type AgeBand = 'TEENS' | 'TWENTIES' | 'THIRTIES' | 'FORTIES' | 'FIFTIES_PLUS';
+
+export const AGE_BAND_LABELS: Record<AgeBand, string> = {
+  TEENS: '10대',
+  TWENTIES: '20대',
+  THIRTIES: '30대',
+  FORTIES: '40대',
+  FIFTIES_PLUS: '50대 이상',
+};
+
+export interface AgeBandResponse {
+  ageBand: AgeBand | null;
+}
+
+// "내 또래 대비 투자성향" — 같은 나이대의 온보딩 리스크 점수 평균과 내 점수를 비교.
+export interface PeerComparisonResponse {
+  ageBand: AgeBand;
+  myRiskScore: number;
+  myProfileType: 'STABLE' | 'NEUTRAL' | 'AGGRESSIVE';
+  peerAvgRiskScore: number;
+  peerCount: number;
+  comparisonText: string;
+}
+
+export function getMyAgeBand(): Promise<AgeBandResponse> {
+  return authFetch<AgeBandResponse>('/api/users/me/age-band');
+}
+
+export function updateMyAgeBand(ageBand: AgeBand): Promise<AgeBandResponse> {
+  return authFetch<AgeBandResponse>('/api/users/me/age-band', {
+    method: 'PUT',
+    body: JSON.stringify({ ageBand }),
+  });
+}
+
+// 나이대 미입력이거나 온보딩 미진단이면 204 → null.
+export function getMyPeerComparison(): Promise<PeerComparisonResponse | null> {
+  return authFetch<PeerComparisonResponse | null>('/api/users/me/peer-comparison');
+}

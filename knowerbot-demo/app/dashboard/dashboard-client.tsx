@@ -41,7 +41,7 @@ export default function DashboardClient() {
             <div className="eyebrow">다시 오신 것을 환영해요</div>
             <h1 style={{ fontSize: 32 }}>안녕하세요, {user.nickname}님</h1>
             <p className="lede" style={{ fontSize: 15 }}>
-              스파링 시즌 1, 1턴까지 진행하셨어요. 오늘도 이어서 훈련해볼까요?
+              모의고사 1턴까지 진행하셨어요. 오늘도 이어서 훈련해볼까요?
             </p>
           </div>
         </div>
@@ -68,7 +68,7 @@ export default function DashboardClient() {
               style={{ background: 'var(--green)', color: 'white', border: 0 }}
             >
               <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
-                스파링 시즌 1 · 1 / 10턴
+                모의고사 · 1 / 10턴
               </span>
               <h3 style={{ color: 'white' }}>모의투자 이어하기</h3>
               <p style={{ color: 'rgba(255,255,255,0.9)' }}>지난번 멈춘 곳부터 바로 이어가요.</p>

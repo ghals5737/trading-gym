@@ -47,6 +47,9 @@ data class InvestorProfileResponse(
 	val infoHabitLevel: InvestorInfoHabitLevel, // 정보 습관 (직접조사형/균형형/의존형)
 	val infoHabitTotalScore: Int,
 	val explanationText: String,
+	// 설문 답변으로 추정한 정확성/침착성/공격성 초기 스탯 — 모의고사·퀴즈 데이터가 쌓이기
+	// 전의 "베이스라인". 마이페이지 스탯 탭의 행동 기반 3분류와 같은 언어를 씀.
+	val initialCategoryScores: List<StatCategoryScoreResponse>,
 	val createdAt: Instant,
 )
 

@@ -12,6 +12,11 @@ interface SimulationSessionRepository : JpaRepository<SimulationSession, UUID> {
 		status: SimulationSessionStatus,
 	): SimulationSession?
 
-	// 랭킹 계산용 — 종료된 세션만 최종 수익률로 집계함(진행 중인 세션은 아직 확정 전).
+	// 종료된 세션만 — 마이페이지 "모의고사 기록"(최신순).
+	fun findByUser_UsernameAndStatusOrderByEndedAtDesc(
+		username: String,
+		status: SimulationSessionStatus,
+	): List<SimulationSession>
+
 	fun findByStatus(status: SimulationSessionStatus): List<SimulationSession>
 }

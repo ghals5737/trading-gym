@@ -1,11 +1,13 @@
 package com.tradinggym.backend.service
 
+import com.tradinggym.backend.dto.SessionHistoryItemResponse
 import com.tradinggym.backend.dto.SessionStatScoreResponse
 import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.TradeSummaryResponse
 import com.tradinggym.backend.dto.TurnSummaryResponse
 import com.tradinggym.backend.entity.SessionStat
 import com.tradinggym.backend.entity.SimulationSession
+import com.tradinggym.backend.entity.SimulationSessionStatus
 import com.tradinggym.backend.entity.Trade
 import com.tradinggym.backend.entity.TradeSide
 import com.tradinggym.backend.entity.TradeType
@@ -78,6 +80,8 @@ class SessionSummaryService(
 			creditTradeCount = realTrades.count { it.isCredit },
 			uniqueStockCount = realTrades.mapNotNull { it.stockCode }.toSet().size,
 			disclosureCheckedBuyCount = realTrades.count { it.side == TradeSide.BUY && it.viewedDisclosure },
+			debtOverdue = session.debtOverdue,
+			unpaidDebtAtEnd = session.borrowedAmount,
 			turns = turns,
 		)
 	}
@@ -95,6 +99,32 @@ class SessionSummaryService(
 
 	// 세션 종료(completeSession) 시점에 한 번만 호출됨 — AI 채점을 그 자리에서 계산해서
 	// session_stats에 영구 저장함. 세션이 끝난 뒤엔 값이 안 바뀌니 한 번 저장해두면 충분.
+	// 마이페이지 "모의고사 기록" — 완료된 세션들을 최신순으로, 각 세션의 최종 자산·수익률과
+	// 저장된 AI 채점(session_stats)을 묶어서 내려줌. 완료 세션이 없으면 빈 목록.
+	fun getSessionHistory(username: String): List<SessionHistoryItemResponse> {
+		val sessions = sessionRepository.findByUser_UsernameAndStatusOrderByEndedAtDesc(username, SimulationSessionStatus.COMPLETED)
+		return sessions.map { session ->
+			val sessionId = requireNotNull(session.id)
+			val turnLogs = turnLogRepository.findBySessionIdOrderByTurnNumberAsc(sessionId)
+			val finalValue = turnLogs.lastOrNull()?.portfolioValue ?: session.startingCash
+			val returnPct = finalValue
+				.subtract(session.startingCash)
+				.divide(session.startingCash, 4, RoundingMode.HALF_UP)
+				.multiply(BigDecimal(100))
+			SessionHistoryItemResponse(
+				sessionId = sessionId,
+				startTurnDate = session.startTurnDate ?: (turnLogs.firstOrNull()?.turnDate ?: session.currentTurnDate),
+				lastTurnDate = turnLogs.lastOrNull()?.turnDate ?: session.currentTurnDate,
+				turnCount = session.turnCount,
+				startingCash = session.startingCash,
+				finalPortfolioValue = finalValue,
+				returnPct = returnPct,
+				endedAt = session.endedAt,
+				stats = sessionStatRepository.findBySessionIdOrderByStatKeyAsc(sessionId).map { it.toResponse() },
+			)
+		}
+	}
+
 	@Transactional
 	fun finalizeAndPersistStats(username: String, sessionId: UUID): List<SessionStatScoreResponse> {
 		val session = requireOwnedSession(username, sessionId)

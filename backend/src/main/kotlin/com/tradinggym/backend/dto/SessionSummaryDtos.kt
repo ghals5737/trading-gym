@@ -5,6 +5,7 @@ import com.tradinggym.backend.entity.TradeType
 import com.tradinggym.backend.entity.TurnAction
 import com.tradinggym.backend.entity.TurnUnit
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -27,6 +28,9 @@ data class SessionSummaryResponse(
 	val creditTradeCount: Int,
 	val uniqueStockCount: Int,
 	val disclosureCheckedBuyCount: Int,
+	// 미수금(신용매수 대출) 상환 규칙 관련 — 채점 프롬프트에 그대로 들어감.
+	val debtOverdue: Boolean, // 상환 기한(발생 턴+10턴)을 넘긴 적이 있는 세션
+	val unpaidDebtAtEnd: BigDecimal, // 세션이 끝난 시점에 안 갚고 남은 미수금(0이면 완납)
 	val turns: List<TurnSummaryResponse>,
 )
 
@@ -50,4 +54,18 @@ data class TradeSummaryResponse(
 	val tradeType: TradeType,
 	val viewedDisclosure: Boolean,
 	val reasonText: String,
+)
+
+// 마이페이지 "모의고사 기록" — 완료된 세션 하나당 결과 요약 + AI 채점 8개 지표.
+// 최신 세션이 먼저 오게 정렬해서 내려줌.
+data class SessionHistoryItemResponse(
+	val sessionId: UUID,
+	val startTurnDate: LocalDate,
+	val lastTurnDate: LocalDate,
+	val turnCount: Int,
+	val startingCash: BigDecimal,
+	val finalPortfolioValue: BigDecimal,
+	val returnPct: BigDecimal,
+	val endedAt: Instant?,
+	val stats: List<SessionStatScoreResponse>,
 )

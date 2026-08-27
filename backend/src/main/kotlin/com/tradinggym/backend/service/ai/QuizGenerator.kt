@@ -8,6 +8,9 @@ import com.tradinggym.backend.service.EducationSearchResult
 data class QuizGenerationInput(
 	val targetStatLabel: String,
 	val sourceExcerpts: List<EducationSearchResult>,
+	// 프롬프트 버전(v1/v2) — application.yml의 quiz.prompt-version으로 선택.
+	// 다음주에 두 버전이 만든 문제 품질을 비교하기 위한 실험 장치(QuizGenerationPrompt 참고).
+	val promptVersion: String = "v1",
 )
 
 data class GeneratedQuiz(

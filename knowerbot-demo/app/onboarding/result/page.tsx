@@ -73,6 +73,8 @@ export default function OnboardingResultPage() {
         </div>
       </div>
 
+      <InitialCategoryCards scores={profile.initialCategoryScores} />
+
       {warning && (
         <div
           style={{
@@ -120,6 +122,40 @@ export default function OnboardingResultPage() {
         <Link href="/library" className="btn btn-secondary">
           맞춤 교육 받으러가기
         </Link>
+      </div>
+    </div>
+  );
+}
+
+// 설문 기반 정확성/침착성/공격성 초기 스탯 카드 — 마이페이지 스탯 탭(행동 기반)과 같은
+// 3분류 언어를 사전조사 결과에서도 미리 보여줌. 공격성은 좋고 나쁨이 아니라 성향이라 중립색.
+function InitialCategoryCards({ scores }: { scores: InvestorProfileResponse['initialCategoryScores'] }) {
+  if (!scores || scores.length === 0) return null;
+  return (
+    <div style={{ width: '100%', textAlign: 'left' }}>
+      <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: 'var(--soft)' }}>
+        설문으로 추정한 초기 스탯 — 모의고사를 진행하면 실제 행동 기반으로 업데이트돼요
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+        {scores.map((cat) => {
+          const tone = cat.higherIsBetter
+            ? cat.scorePct >= 70
+              ? 'var(--green)'
+              : cat.scorePct < 40
+              ? 'var(--red)'
+              : 'var(--amber)'
+            : 'var(--soft)';
+          return (
+            <div key={cat.category} className="result-card" style={{ padding: 16 }}>
+              <span className="result-tag">{cat.label}</span>
+              <h3 style={{ margin: '6px 0 4px', fontSize: 24, color: tone }}>{cat.scorePct}점</h3>
+              <div style={{ height: 6, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden', margin: '4px 0 8px' }}>
+                <div style={{ width: `${cat.scorePct}%`, height: '100%', borderRadius: 999, background: tone }} />
+              </div>
+              <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>{cat.description}</p>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

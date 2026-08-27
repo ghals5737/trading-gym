@@ -12,6 +12,7 @@ import com.tradinggym.backend.repository.PersonalizedQuizRepository
 import com.tradinggym.backend.repository.UserJpaRepository
 import com.tradinggym.backend.service.ai.QuizGenerationInput
 import com.tradinggym.backend.service.ai.QuizGenerator
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -29,6 +30,8 @@ class QuizGenerationService(
 	private val quizGenerator: QuizGenerator,
 	private val quizRepository: PersonalizedQuizRepository,
 	private val quizOptionRepository: PersonalizedQuizOptionRepository,
+	// 프롬프트 버전 실험용(v1/v2) — QuizGenerationPrompt 참고. 다음주 비교 후 하나로 확정 예정.
+	@Value("\${quiz.prompt-version:v1}") private val promptVersion: String,
 ) {
 
 	@Transactional
@@ -38,13 +41,13 @@ class QuizGenerationService(
 
 		val stats = aggregateStatService.getMyAggregateStats(username)
 		val weakest = stats.minByOrNull { it.avgScorePct }
-			?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "아직 완료한 모의투자 세션이 없어서 맞춤 문제를 만들 수 없어요. 스파링을 먼저 끝내주세요.")
+			?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "아직 완료한 모의고사가 없어서 맞춤 문제를 만들 수 없어요. 모의고사를 먼저 끝내주세요.")
 
-		val label = STAT_LABEL.getValue(weakest.statKey)
-		val searchQuery = STAT_SEARCH_QUERY.getValue(weakest.statKey)
+		val label = SessionStatCatalog.LABEL.getValue(weakest.statKey)
+		val searchQuery = SessionStatCatalog.SEARCH_QUERY.getValue(weakest.statKey)
 		val sources = educationSearchClient.search(searchQuery, topK = 3)
 
-		val generated = quizGenerator.generate(QuizGenerationInput(targetStatLabel = label, sourceExcerpts = sources))
+		val generated = quizGenerator.generate(QuizGenerationInput(targetStatLabel = label, sourceExcerpts = sources, promptVersion = promptVersion))
 			?: throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "지금은 문제를 만들지 못했어요. 잠시 후 다시 시도해주세요.")
 
 		val topSource = sources.firstOrNull()
@@ -118,32 +121,6 @@ class QuizGenerationService(
 		)
 	}
 
-	companion object {
-		// /my "스탯" 탭(SESSION_STAT_LABELS)과 같은 한국어 라벨 — 프롬프트에 그대로 넣어서 씀.
-		private val STAT_LABEL = mapOf(
-			SessionStatKey.JUDGMENT_ACCURACY to "판단 정확도",
-			SessionStatKey.DISCLOSURE_CHECK_RATE to "공시 확인율",
-			SessionStatKey.RISK_MANAGEMENT_SCORE to "리스크 관리",
-			SessionStatKey.IMPULSIVE_TRADING to "충동매매 억제",
-			SessionStatKey.LOSS_AVERSION to "손실 회피 대응",
-			SessionStatKey.CONFIRMATION_BIAS to "확증편향 억제",
-			SessionStatKey.DIVERSIFICATION to "분산투자",
-			SessionStatKey.GAMBLING_SIGNAL to "도박성 신호 낮음",
-		)
-
-		// 각 지표를 RAG 검색어로 바꾸는 매핑 — SessionStatKey 자체는 영어 코드라 그대로 검색하면
-		// 안 걸려서, 그 지표가 실제로 뜻하는 개념을 자연어 검색어로 풀어씀.
-		private val STAT_SEARCH_QUERY = mapOf(
-			SessionStatKey.JUDGMENT_ACCURACY to "투자 판단을 정확하게 하는 방법",
-			SessionStatKey.DISCLOSURE_CHECK_RATE to "매수 전 공시를 확인해야 하는 이유",
-			SessionStatKey.RISK_MANAGEMENT_SCORE to "레버리지 신용거래 리스크 관리",
-			SessionStatKey.IMPULSIVE_TRADING to "충동매매 뇌동매매 위험성",
-			SessionStatKey.LOSS_AVERSION to "손실 회피 손절 기준",
-			SessionStatKey.CONFIRMATION_BIAS to "확증편향 투자 판단",
-			SessionStatKey.DIVERSIFICATION to "분산투자를 해야 하는 이유",
-			SessionStatKey.GAMBLING_SIGNAL to "손실 후 베팅을 키우는 도박성 매매",
-		)
-	}
 }
 
 private fun PersonalizedQuiz.toResponse(options: List<PersonalizedQuizOption>) = PersonalizedQuizResponse(

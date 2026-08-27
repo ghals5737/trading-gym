@@ -36,3 +36,16 @@ data class StockNewsResponse(
 	val source: String,
 	val tradeDate: LocalDate,
 )
+
+// DART 공시 요약(고정 데이터, StockDisclosure) — 세션 현재 거래일까지 나온 공시 중 최신
+// 몇 건. 뉴스와 달리 공시는 오래돼도 유효한 정보라 lookback 제한 없음.
+data class StockDisclosureItemResponse(
+	val title: String,
+	val summary: String,
+	val disclosedDate: LocalDate,
+)
+
+data class StockDisclosureResponse(
+	val stockCode: String,
+	val items: List<StockDisclosureItemResponse>,
+)

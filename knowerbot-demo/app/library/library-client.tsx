@@ -4,7 +4,12 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import LoginButton from '../../components/LoginButton';
-import { getLibraryDocuments, type LibraryDocumentResponse } from '../../lib/library-api';
+import {
+  getLibraryDocuments,
+  getLibraryRecommendations,
+  type LibraryDocumentResponse,
+  type LibraryRecommendationsResponse,
+} from '../../lib/library-api';
 
 declare global {
   interface Window {
@@ -37,6 +42,7 @@ export default function LibraryClient() {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [checkedLogin, setCheckedLogin] = useState(false);
   const [documents, setDocuments] = useState<LibraryDocumentResponse[] | null>(null);
+  const [recommendations, setRecommendations] = useState<LibraryRecommendationsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,6 +60,8 @@ export default function LibraryClient() {
     getLibraryDocuments()
       .then(setDocuments)
       .catch((e) => setError(e instanceof Error ? e.message : '자료 목록을 불러오지 못했어요'));
+    // 추천 실패는 치명적이지 않음 — 섹션만 조용히 숨김(전체 목록은 그대로).
+    getLibraryRecommendations().then(setRecommendations).catch(() => setRecommendations(null));
   }, []);
 
   if (!checkedLogin) {
@@ -100,6 +108,68 @@ export default function LibraryClient() {
         <p style={{ margin: '8px 0 24px', fontSize: 13, color: 'var(--muted)' }}>
           AI 코치와 맞춤 퀴즈가 실제로 검색해서 근거로 삼는 자료예요. 원문을 그대로 읽어볼 수 있어요.
         </p>
+
+        {recommendations && (
+          // 내 약점 스탯 기반 RAG 추천 — 오늘의 PT와 같은 원리(가장 약한 지표 → 벡터 검색)를 자료 추천에 적용.
+          <div className="result-card" style={{ padding: 20, marginBottom: 24 }}>
+            <span
+              style={{
+                display: 'inline-block',
+                fontSize: 11,
+                fontWeight: 800,
+                color: 'var(--green)',
+                background: 'var(--green-chip)',
+                borderRadius: 999,
+                padding: '3px 10px',
+                marginBottom: 8,
+              }}
+            >
+              맞춤 추천 · {recommendations.targetStatLabel} 보완
+            </span>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--soft)' }}>{recommendations.reason}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {recommendations.items.map((item, i) => {
+                const pages =
+                  item.pageStart != null
+                    ? item.pageStart === item.pageEnd
+                      ? ` · ${item.pageStart}쪽`
+                      : ` · ${item.pageStart}~${item.pageEnd}쪽`
+                    : '';
+                const body = (
+                  <>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <strong style={{ fontSize: 13.5, flex: 1 }}>
+                        {item.title}
+                        <span style={{ fontWeight: 600, color: 'var(--muted)' }}>{pages}</span>
+                      </strong>
+                      {item.orgName && <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{item.orgName}</span>}
+                    </div>
+                    <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                      {item.excerpt}…
+                    </p>
+                  </>
+                );
+                const style = {
+                  display: 'block',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: '1px solid var(--line)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                } as const;
+                return item.documentId != null ? (
+                  <Link key={i} href={`/library/${item.documentId}`} style={style}>
+                    {body}
+                  </Link>
+                ) : (
+                  <div key={i} style={style}>
+                    {body}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {error && <p style={{ fontSize: 13, color: 'var(--red)' }}>{error}</p>}
         {!error && !documents && <p style={{ fontSize: 13, color: 'var(--muted)' }}>불러오는 중...</p>}

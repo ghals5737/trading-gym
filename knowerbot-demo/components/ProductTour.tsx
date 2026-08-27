@@ -34,7 +34,7 @@ interface TourStep {
   description: string;
 }
 
-// TopNav의 data-tour 속성과 짝지어짐 — 아직 준비 중인 "리와인드"는 일부러 뺌.
+// TopNav의 data-tour 속성과 짝지어짐.
 // 이전엔 대시보드에 머문 채로 nav 탭만 하이라이트했는데, 실제로 그 페이지가 어떻게
 // 생겼는지 보여주는 게 더 도움이 될 것 같아서 각 스텝마다 실제로 그 페이지로
 // 이동시킴 — 탭 하이라이트는 "지금 이 페이지 맞다"는 표시로 남겨둠.
@@ -42,7 +42,7 @@ const STEPS: TourStep[] = [
   {
     href: '/simulation',
     selector: '[data-tour="nav-simulation"]',
-    title: '스파링',
+    title: '모의고사',
     description: '실제 시세 기반 모의투자예요. 신용거래·반대매매까지 안전하게 먼저 경험해볼 수 있어요.',
   },
   {

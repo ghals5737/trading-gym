@@ -8,8 +8,7 @@ import useLoggedIn from './useLoggedIn';
 import { logout } from '../lib/auth';
 
 const TABS = [
-  { label: '리와인드', href: '/rewind' },
-  { label: '스파링', href: '/simulation', tourId: 'nav-simulation' },
+  { label: '모의고사', href: '/simulation', tourId: 'nav-simulation' },
   { label: '마이 페이지', href: '/my', tourId: 'nav-my' },
   { label: '오늘의 PT', href: '/pt', tourId: 'nav-pt' },
   { label: '자료실', href: '/library', tourId: 'nav-library' },

@@ -307,5 +307,36 @@ private fun InvestorProfile.toResponse() = InvestorProfileResponse(
 	infoHabitLevel = infoHabitLevel,
 	infoHabitTotalScore = infoHabitTotalScore,
 	explanationText = explanationText,
+	initialCategoryScores = initialCategoryScores(),
 	createdAt = createdAt,
 )
+
+// 설문(문항별 1~4점)으로 추정한 정확성/침착성/공격성 초기 스탯 — 행동 데이터가 쌓이기 전의
+// 베이스라인. 1~4점을 0~100으로 환산: (점수-1)/3*100. 문항 방향이 "높을수록 나쁨"인 것은
+// 뒤집어서(5-점수) 합산.
+private fun InvestorProfile.initialCategoryScores(): List<com.tradinggym.backend.dto.StatCategoryScoreResponse> {
+	fun pct(vararg scores1to4: Int): Int =
+		(scores1to4.map { (it - 1) / 3.0 * 100 }.average()).toInt()
+
+	// 정확성 — 아는 만큼 근거로 판단할 수 있음: 지식 3문항 + 정보 출처(공시·리포트를 직접 볼수록 높음 → 뒤집기)
+	val accuracy = pct(experienceLevelScore, knowledgeCheckScore, liquidationUnderstandingScore, 5 - infoSourceScore)
+	// 침착성 — 추천에 혹하지 않고(뒤집기), 돈을 급하게 회수할 필요가 없는(투자기간) 정도
+	val composure = pct(5 - tipVerificationScore, investmentHorizonScore)
+	// 공격성 — 위험을 크게 잡으려는 성향: 투자 목적·리스크 선호·레버리지 태도·손실 시 공격 대응
+	val aggressiveness = pct(investmentPurposeScore, riskPreferenceScore, leverageAttitudeScore, lossReactionScore)
+
+	return listOf(
+		com.tradinggym.backend.dto.StatCategoryScoreResponse(
+			category = "ACCURACY", label = "정확성", scorePct = accuracy,
+			description = "아는 개념과 정보 출처로 본 근거 기반 판단력", higherIsBetter = true,
+		),
+		com.tradinggym.backend.dto.StatCategoryScoreResponse(
+			category = "COMPOSURE", label = "침착성", scorePct = composure,
+			description = "추천에 혹하지 않고 기다릴 수 있는 정도", higherIsBetter = true,
+		),
+		com.tradinggym.backend.dto.StatCategoryScoreResponse(
+			category = "AGGRESSIVENESS", label = "공격성", scorePct = aggressiveness,
+			description = "위험을 크게 잡으려는 성향 (좋고 나쁨이 아니라 스타일이에요)", higherIsBetter = false,
+		),
+	)
+}

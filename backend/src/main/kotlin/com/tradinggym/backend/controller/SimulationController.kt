@@ -5,9 +5,11 @@ import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.QuoteResponse
 import com.tradinggym.backend.dto.SessionResponse
+import com.tradinggym.backend.dto.SessionHistoryItemResponse
 import com.tradinggym.backend.dto.SessionStatScoreResponse
 import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
+import com.tradinggym.backend.dto.StockDisclosureResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
@@ -55,6 +57,11 @@ class SimulationController(
 	fun listSessions(authentication: Authentication): List<SessionResponse> =
 		simulationService.listSessions(authentication.name)
 
+	// 마이페이지 "모의고사 기록" — 완료된 세션들의 결과 요약 + AI 채점, 최신순.
+	@GetMapping("/history")
+	fun getSessionHistory(authentication: Authentication): List<SessionHistoryItemResponse> =
+		sessionSummaryService.getSessionHistory(authentication.name)
+
 	@GetMapping("/{sessionId}/quotes")
 	fun getQuotes(authentication: Authentication, @PathVariable sessionId: UUID): List<QuoteResponse> =
 		simulationService.getQuotes(authentication.name, sessionId)
@@ -86,6 +93,15 @@ class SimulationController(
 		return ResponseEntity.ok(news)
 	}
 
+	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 최신 3건.
+	// 공시가 하나도 없어도 200 + 빈 목록(패널 자체는 항상 열 수 있게).
+	@GetMapping("/{sessionId}/stocks/{stockCode}/disclosures")
+	fun getStockDisclosures(
+		authentication: Authentication,
+		@PathVariable sessionId: UUID,
+		@PathVariable stockCode: String,
+	): StockDisclosureResponse = simulationService.getStockDisclosures(authentication.name, sessionId, stockCode)
+
 	@PostMapping("/{sessionId}/trades")
 	fun recordTrade(
 		authentication: Authentication,
@@ -107,6 +123,13 @@ class SimulationController(
 		@PathVariable sessionId: UUID,
 		@RequestBody request: AdvanceTurnRequest,
 	): SessionResponse = simulationService.advanceTurn(authentication.name, sessionId, request)
+
+	// "미수금 갚기" — 현금부터, 모자라면 보유 종목을 필요한 만큼만 시가 매도해서 상환.
+	@PostMapping("/{sessionId}/repay-debt")
+	fun repayDebt(
+		authentication: Authentication,
+		@PathVariable sessionId: UUID,
+	): SessionResponse = simulationService.repayDebt(authentication.name, sessionId)
 
 	@PostMapping("/{sessionId}/complete")
 	fun completeSession(authentication: Authentication, @PathVariable sessionId: UUID): SessionResponse =

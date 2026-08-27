@@ -6,7 +6,6 @@ import TopNav from '../../components/TopNav';
 import PriceChart from '../../components/PriceChart';
 import LoginButton from '../../components/LoginButton';
 import { stockDetail, riskIntervention } from '../../lib/mock-data';
-import { getReturnRateRanking, type RankingEntryResponse } from '../../lib/ranking-api';
 import {
   getActiveSession,
   getAvailableTradingDates,
@@ -14,18 +13,23 @@ import {
   getQuotes,
   getStockHistory,
   getStockNews,
+  getStockDisclosures,
   recordTrade,
   listTrades,
   advanceTurn,
   completeSession,
+  repayDebt,
+  getSessionStats,
   type SessionResponse,
   type QuoteResponse,
   type TradeResponse,
-  type TradeOrderType,
   type TurnUnit,
   type PricePoint,
   type StockNewsResponse,
+  type StockDisclosureResponse,
+  type SessionStatScoreResponse,
 } from '../../lib/simulation-api';
+import { SESSION_STAT_LABELS } from '../../lib/user-api';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { warningFor } from '../../lib/onboarding-copy';
 
@@ -44,7 +48,7 @@ declare global {
 // 매매 이유는 이 화면 안의 메모창으로 받는다.
 // 예전엔 KnowerBot이 채팅으로 물어보고 답을 기다렸는데(window.knowerbotAskReason),
 // 매매할 때마다 3D 로봇이 걸어와 채팅으로 대화해야 해서 흐름이 끊긴다는 피드백이 있었다.
-// 리와인드(모의고사)와 같은 방식(그 자리에서 메모 입력)으로 통일했다.
+// 그 자리에서 메모로 바로 입력하는 방식이다.
 // 이유를 남기는 것 자체는 그대로다 — 행동 리포트가 이 텍스트를 재료로 쓴다.
 
 // knowerbot-runtime.js는 <Script strategy="afterInteractive">라 이 컴포넌트가 먼저
@@ -65,18 +69,18 @@ function notifyKnowerbotLoginRequired() {
 // 로그인 안 한 상태로 /simulation에 왔을 때 보여주는 소개 카드 4개 — 랜딩 페이지의
 // features 카드 그리드와 같은 스타일(.card-grid/.card)을 재사용해서 빈 화면 대신
 // 이 페이지에서 실제로 뭘 할 수 있는지 미리 보여줌.
-const SPARRING_LOGIN_FEATURES = [
+const EXAM_LOGIN_FEATURES = [
   { icon: '1', title: '실제 시세 연동', desc: '삼성전자·SK하이닉스 등 실제 종목의 최근 1년 시세로 진짜 같은 매매를 연습해요.' },
-  { icon: '2', title: '신용거래 체험', desc: '레버리지와 반대매매를 모의로 먼저 겪어보고, 진짜 계좌에서 무너지지 않는 법을 배워요.' },
-  { icon: '3', title: 'AI 코치 채점', desc: '세션이 끝나면 AI가 판단 정확도·리스크 관리 등 8개 지표를 직접 채점해줘요.' },
-  { icon: '4', title: '시즌 랭킹', desc: '다른 사용자들과 수익률로 겨뤄보며 성장 동기를 얻어요.' },
+  { icon: '2', title: '공시·뉴스·차트로 판단', desc: 'DART 공시 요약과 종목 뉴스, 차트를 근거로 매매를 판단하는 습관을 길러요.' },
+  { icon: '3', title: '미수거래 체험', desc: '현금보다 큰 매수(미수)와 반대매매를 모의로 먼저 겪어보고, 진짜 계좌에서 무너지지 않는 법을 배워요.' },
+  { icon: '4', title: 'AI 코치 채점', desc: '세션이 끝나면 AI가 판단 정확도·리스크 관리 등 8개 지표를 직접 채점해줘요.' },
 ];
 
-const STARTING_CASH = 10_000_000;
+const STARTING_CASH = 100_000_000; // 회의 결정: 1억으로 시작
 const MAINTENANCE_RATIO = 1.4; // 담보 유지비율 140% — 백엔드 SimulationService와 동일 기준
 // 시작일~종료일 사이 최소 거래일수 — 백엔드 SimulationService.MIN_START_DATE_RANGE_DAYS(=MAX_TURNS)와 동일.
 // 여긴 종료일 드롭다운 후보를 미리 걸러내는 용도일 뿐, 실제 검증은 서버가 다시 함.
-const MIN_RANGE_TRADING_DAYS = 20;
+const MIN_RANGE_TRADING_DAYS = 10; // 백엔드 MIN_START_DATE_RANGE_DAYS(= MAX_TURNS)와 동일하게 유지
 
 interface Holding {
   stockCode: string;
@@ -153,9 +157,6 @@ export default function SimulationClient() {
   const [stockNews, setStockNews] = useState<StockNewsResponse | null>(null);
 
   const [quantity, setQuantity] = useState(10);
-  const [credit, setCredit] = useState(false);
-  const [orderType, setOrderType] = useState<TradeOrderType>('MARKET');
-  const [limitPriceInput, setLimitPriceInput] = useState('');
   const [pendingReason, setPendingReason] = useState('');
   const [asking, setAsking] = useState(false);
   // 메모창 상태 — resolve를 들고 있다가 사용자가 확인/취소하면 askReason의 프라미스를 푼다.
@@ -173,12 +174,17 @@ export default function SimulationClient() {
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
   const [liquidationEvent, setLiquidationEvent] = useState<TradeResponse[] | null>(null);
   const [completedSummary, setCompletedSummary] = useState<
-    { startingCash: number; finalValue: number; returnPct: number; reason?: string } | null
+    { startingCash: number; finalValue: number; returnPct: number; reason?: string; stats?: SessionStatScoreResponse[] } | null
   >(null);
   const [ending, setEnding] = useState(false);
+  const [repaying, setRepaying] = useState(false);
   const [profile, setProfile] = useState<InvestorProfileResponse | null>(null);
-  const [ranking, setRanking] = useState<RankingEntryResponse[]>([]);
   const [needsLogin, setNeedsLogin] = useState(false);
+  // 공시 요약 패널 — "열어본" 행동 자체가 공시 확인율 스탯의 원천이라, 자동으로 펼쳐두지
+  // 않고 사용자가 직접 열게 한다. 연 기록은 종목+턴 단위로 남겨서 매매 기록에 붙는다.
+  const [disclosure, setDisclosure] = useState<StockDisclosureResponse | null>(null);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const [viewedDisclosureKeys, setViewedDisclosureKeys] = useState<Set<string>>(new Set());
 
   // 진행 중인 세션 있으면 이어가고, 없으면 시작 날짜를 고르게 함(자동 시작 안 함)
   useEffect(() => {
@@ -211,10 +217,8 @@ export default function SimulationClient() {
         setLoading(false);
       }
     })();
-    // 온보딩 진단 결과 — 신용거래 경고 강도를 성향별로 차등하는 데 씀. 미진단이면 null(차등 없음).
+    // 온보딩 진단 결과 — 미수 매수 경고 강도를 성향별로 차등하는 데 씀. 미진단이면 null(차등 없음).
     getMyInvestorProfile().then(setProfile).catch(() => setProfile(null));
-    // 완료된 세션들 중 유저별 최고 수익률로 줄 세운 랭킹 — 아직 완료 세션이 없으면 빈 배열.
-    getReturnRateRanking().then(setRanking).catch(() => setRanking([]));
   }, []);
 
   // 시작일부터 최소 MIN_RANGE_TRADING_DAYS 거래일 이상 떨어진 날짜만 종료일 후보로 줌 —
@@ -275,9 +279,26 @@ export default function SimulationClient() {
     getStockNews(session.id, activeCode).then(setStockNews);
   }, [session, activeCode]);
 
+  // 종목이나 턴이 바뀌면 공시 패널을 다시 접는다 — "이 종목의 공시를 이번 턴에 확인했는지"를
+  // 매번 새로 판단하게 하려는 것. 이미 열어본 종목+턴이면 내용은 캐시 없이 다시 불러온다.
+  useEffect(() => {
+    setDisclosure(null);
+    setDisclosureOpen(false);
+  }, [session?.turnCount, activeCode]);
+
+  async function openDisclosure() {
+    if (!session || !activeCode) return;
+    setDisclosureOpen(true);
+    setViewedDisclosureKeys((prev) => new Set(prev).add(`${activeCode}:${session.turnCount}`));
+    try {
+      setDisclosure(await getStockDisclosures(session.id, activeCode));
+    } catch (e) {
+      setDisclosure({ stockCode: activeCode, items: [] });
+    }
+  }
+
   const active = quotes.find((q) => q.stockCode === activeCode);
-  const limitPrice = Number(limitPriceInput);
-  const estimate = (orderType === 'LIMIT' && limitPrice > 0 ? limitPrice : active?.openPrice ?? 0) * quantity;
+  const estimate = (active?.openPrice ?? 0) * quantity;
   const prevClose = historyPoints[historyPoints.length - 1]?.closePrice;
   const changePct = active && prevClose ? ((active.openPrice - prevClose) / prevClose) * 100 : 0;
   const sparklinePoints = active ? [...historyPoints.map((p) => p.closePrice), active.openPrice] : historyPoints.map((p) => p.closePrice);
@@ -291,6 +312,23 @@ export default function SimulationClient() {
   const borrowedAmount = session?.borrowedAmount ?? 0;
   // 담보비율 = (현금 + 보유종목 평가액) / 대출원금 — 백엔드 checkMarginCall과 동일한 계산.
   const collateralRatioPct = borrowedAmount > 0 ? (portfolioValue / borrowedAmount) * 100 : null;
+  // 미수금 상환 기한 — 백엔드가 내려준 기한 턴 기준. 남은 턴이 음수면 이미 기한 초과.
+  const debtTurnsLeft =
+    session && session.debtDeadlineTurn != null && borrowedAmount > 0 ? session.debtDeadlineTurn - session.turnCount : null;
+
+  // 진행률 프로그래스바용 — 모의고사는 "턴"과 "기간(종료 예정일)" 중 먼저 끝나는 쪽에서
+  // 종료됨(일주일/한달씩 건너뛰면 턴이 남아도 기간이 먼저 바닥날 수 있음). 둘 다 보여줘서
+  // "턴이 남았는데 왜 못 넘기지?"라는 혼란을 없앰.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const periodTotalDays = session
+    ? Math.max(1, Math.round((Date.parse(session.targetEndDate) - Date.parse(session.startTurnDate)) / DAY_MS))
+    : 0;
+  const periodPassedDays = session
+    ? Math.min(periodTotalDays, Math.max(0, Math.round((Date.parse(session.currentTurnDate) - Date.parse(session.startTurnDate)) / DAY_MS)))
+    : 0;
+  const periodLeftDays = periodTotalDays - periodPassedDays;
+  const turnPct = session ? (session.turnCount / session.maxTurns) * 100 : 0;
+  const periodPct = session ? (periodPassedDays / periodTotalDays) * 100 : 0;
 
   // 매매/턴진행 후 매매 내역을 다시 불러와서 새로 생긴 반대매매(FORCED_LIQUIDATION) 기록이
   // 있는지 diff — 서버가 담보비율 미달을 감지해서 강제로 판 경우 이 목록에 나타남.
@@ -304,38 +342,25 @@ export default function SimulationClient() {
 
   async function executeTrade(side: 'BUY' | 'SELL', reason: string) {
     if (!session || !active) return;
-    if (orderType === 'LIMIT' && !(limitPrice > 0)) {
-      setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
-      return;
-    }
     setActionResult(null);
     const prevTradeIds = new Set(trades.map((t) => t.id));
     try {
       const trade = await recordTrade(session.id, {
         stockCode: active.stockCode,
         side,
-        orderType,
-        limitPrice: orderType === 'LIMIT' ? limitPrice : undefined,
         quantity,
-        isCredit: credit,
-        leverageRatio: credit ? 1.5 : undefined,
+        // 이번 턴에 이 종목의 공시 요약 패널을 열어봤는지 — 공시 확인율 스탯의 원천.
+        viewedDisclosure: viewedDisclosureKeys.has(`${active.stockCode}:${session.turnCount}`),
         reasonText: reason,
       });
       const [s] = await Promise.all([getActiveSession(), refreshAndDetectLiquidation(session.id, prevTradeIds)]);
       if (s) setSession(s);
       setShowRisk(false);
       setPendingReason('');
-      if (trade.filled) {
-        setActionResult({
-          type: 'success',
-          message: `${active.stockName} ${quantity}주 ${side === 'BUY' ? '매수' : '매도'} 체결 · ${trade.price?.toLocaleString()}원`,
-        });
-      } else {
-        setActionResult({
-          type: 'warning',
-          message: `지정가 ${limitPrice.toLocaleString()}원엔 체결되지 않았어요 — 오늘 그 가격은 오지 않았어요.`,
-        });
-      }
+      setActionResult({
+        type: 'success',
+        message: `${active.stockName} ${quantity}주 ${side === 'BUY' ? '매수' : '매도'} 체결 · ${trade.price?.toLocaleString()}원`,
+      });
     } catch (e) {
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '매매에 실패했어요' });
       setShowRisk(false);
@@ -361,28 +386,28 @@ export default function SimulationClient() {
   }
 
   // 매수 버튼을 누르면 먼저 이유를 적는 메모창이 뜸 — 이유를 남긴 뒤에야
-  // 신용매수 위험도 체크(필요하면 경고 모달)로 넘어가고, 최종적으로 매매가 기록됨.
+  // 미수 매수 위험도 체크(필요하면 경고 모달)로 넘어가고, 최종적으로 매매가 기록됨.
   // 온보딩에서 "위험한 조합"으로 진단된 사용자는 경고 버퍼를 더 크게 잡아 더 일찍 경고함.
   async function attemptBuy() {
     if (!session || !active || asking) return;
-    if (orderType === 'LIMIT' && !(limitPrice > 0)) {
-      setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
-      return;
-    }
     setAsking(true);
-    const reason = await askReason(`${active.stockName} ${quantity}주를 ${credit ? '신용으로 ' : ''}매수하려는 이유가 뭐예요?`);
+    const shortfall = Math.max(0, estimate - session.currentCash);
+    const reason = await askReason(
+      `${active.stockName} ${quantity}주를 ${shortfall > 0 ? '미수(빌린 돈)까지 써서 ' : ''}매수하려는 이유가 뭐예요?`,
+    );
     setAsking(false);
     if (!reason) {
       setActionResult({ type: 'warning', message: '이유를 남겨야 매매가 진행돼요.' });
       return;
     }
     setPendingReason(reason);
-    if (credit) {
-      const positionValue = active.openPrice * quantity;
-      const leverageRatio = 1.5;
-      const marginRequired = positionValue / leverageRatio;
-      const newBorrowed = borrowedAmount + (positionValue - marginRequired);
-      const newEquity = session.currentCash - marginRequired + holdingsValue + positionValue;
+    // 현금보다 큰 매수 = 부족분이 자동으로 미수(빌린 돈)로 잡힘(서버와 같은 계산).
+    // 매수 직후 예상 담보비율이 유지비율에 가까우면 위험 개입 모달을 먼저 보여줌 —
+    // 온보딩에서 "위험한 조합"으로 진단된 사용자는 경고 버퍼를 더 크게 잡아 더 일찍 경고함.
+    if (shortfall > 0) {
+      const cashAfter = Math.max(0, session.currentCash - estimate);
+      const newBorrowed = borrowedAmount + shortfall;
+      const newEquity = cashAfter + holdingsValue + estimate;
       const expectedRatio = newBorrowed > 0 ? (newEquity / newBorrowed) * 100 : Infinity;
       const warningBufferPct = riskWarningText ? 40 : 20;
       if (expectedRatio < MAINTENANCE_RATIO * 100 + warningBufferPct) {
@@ -396,10 +421,6 @@ export default function SimulationClient() {
 
   async function attemptSell() {
     if (!session || !active || asking) return;
-    if (orderType === 'LIMIT' && !(limitPrice > 0)) {
-      setActionResult({ type: 'error', message: '지정가를 입력해주세요' });
-      return;
-    }
     setAsking(true);
     const reason = await askReason(`${active.stockName} ${quantity}주를 매도하려는 이유가 뭐예요?`);
     setAsking(false);
@@ -433,11 +454,14 @@ export default function SimulationClient() {
       // 넘기려는 기간이 시세 데이터 범위를 벗어나면 백엔드가 에러 대신 세션을 바로
       // COMPLETED로 종료해서 돌려줌 — 이때는 다음 턴으로 안 넘어가고 종료 화면을 보여줌.
       if (s.status === 'COMPLETED') {
+        // 자동 종료도 서버가 AI 채점을 이미 끝낸 상태 — 결과 화면에 채점을 같이 보여줌.
+        const stats = await getSessionStats(s.id).catch(() => undefined);
         setCompletedSummary({
           startingCash: s.startingCash,
           finalValue: portfolioValue,
           returnPct: ((portfolioValue - s.startingCash) / s.startingCash) * 100,
-          reason: '더 이상 진행할 수 있는 시세 데이터가 없어서 스파링이 자동으로 종료됐어요.',
+          reason: '더 이상 진행할 수 있는 시세 데이터가 없어서 모의고사가 자동으로 종료됐어요.',
+          stats,
         });
         setSession(null);
         return;
@@ -450,22 +474,48 @@ export default function SimulationClient() {
 
   async function handleCompleteSession() {
     if (!session) return;
-    setEnding(true);
+    setEnding(true); // 이 동안 "투자 성향 분석 중" 오버레이가 뜸 — 서버가 AI 채점까지 끝내고 응답함
     setActionResult(null);
     try {
       const startingCash = session.startingCash;
       const finalValue = portfolioValue;
-      await completeSession(session.id);
+      const sessionId = session.id;
+      await completeSession(sessionId); // 서버에서 턴 기록+메모 전체를 AI가 읽고 8개 지표 채점
+      const stats = await getSessionStats(sessionId).catch(() => undefined);
       setCompletedSummary({
         startingCash,
         finalValue,
         returnPct: ((finalValue - startingCash) / startingCash) * 100,
+        stats,
       });
       setSession(null);
     } catch (e) {
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '세션을 종료하지 못했어요' });
     } finally {
       setEnding(false);
+    }
+  }
+
+  // 미수금 갚기 — 현금부터, 모자라면 보유 종목을 필요한 만큼만 시가 매도해서 상환(서버 처리).
+  async function handleRepayDebt() {
+    if (!session || repaying) return;
+    setRepaying(true);
+    setActionResult(null);
+    const before = session.borrowedAmount;
+    const prevTradeIds = new Set(trades.map((t) => t.id));
+    try {
+      const s = await repayDebt(session.id);
+      setSession(s);
+      await refreshAndDetectLiquidation(session.id, prevTradeIds);
+      const repaid = before - s.borrowedAmount;
+      setActionResult({
+        type: 'success',
+        message: `미수금 ${Math.round(repaid).toLocaleString()}원을 갚았어요${s.borrowedAmount > 0 ? ` (남은 미수금 ${Math.round(s.borrowedAmount).toLocaleString()}원)` : ' — 전액 상환 완료!'}`,
+      });
+    } catch (e) {
+      setActionResult({ type: 'error', message: e instanceof Error ? e.message : '미수금을 갚지 못했어요' });
+    } finally {
+      setRepaying(false);
     }
   }
 
@@ -493,9 +543,9 @@ export default function SimulationClient() {
               <span className="badge">짐</span>
               로그인이 필요해요
             </div>
-            <h1>로그인하고 스파링을 시작해보세요</h1>
+            <h1>로그인하고 모의고사를 시작해보세요</h1>
             <p className="lede">
-              실제 시세 기반 모의투자로 신용거래·반대매매까지 안전하게 연습할 수 있어요. 계정별로
+              실제 시세 기반 모의투자로 미수거래·반대매매까지 안전하게 연습할 수 있어요. 계정별로
               진행 상황과 AI 채점 기록이 그대로 저장돼요.
             </p>
             <div className="cta-row">
@@ -503,7 +553,7 @@ export default function SimulationClient() {
             </div>
           </div>
           <div className="card-grid">
-            {SPARRING_LOGIN_FEATURES.map((f) => (
+            {EXAM_LOGIN_FEATURES.map((f) => (
               <div className="card" key={f.title}>
                 <span className="icon">{f.icon}</span>
                 <h3>{f.title}</h3>
@@ -519,10 +569,10 @@ export default function SimulationClient() {
   if (completedSummary) {
     const isGain = completedSummary.returnPct >= 0;
     return (
-      <div style={{ maxWidth: 420, margin: '80px auto', padding: '0 24px' }}>
+      <div style={{ maxWidth: 560, margin: '60px auto', padding: '0 24px' }}>
         <div className="result-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링이 끝났어요</h2>
+            <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>모의고사가 끝났어요</h2>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{completedSummary.reason ?? '이번 세션 결과예요.'}</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
@@ -542,9 +592,38 @@ export default function SimulationClient() {
             시작 자산 {completedSummary.startingCash.toLocaleString()}원 → 최종 자산{' '}
             {Math.round(completedSummary.finalValue).toLocaleString()}원 (현금 + 보유 종목 평가액)
           </p>
-          <button onClick={handleRestart} className="btn btn-primary btn-block">
-            새 세션 시작하기
-          </button>
+
+          {completedSummary.stats && completedSummary.stats.length > 0 && (
+            // 세션 종료 시 서버가 턴 기록+매매 메모 전체를 AI에 넘겨 채점한 8개 지표.
+            <div>
+              <h3 style={{ margin: '4px 0 10px', fontSize: 14 }}>AI 투자 성향 분석</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                {completedSummary.stats.map((stat) => {
+                  const meta = SESSION_STAT_LABELS[stat.statKey];
+                  return (
+                    <div key={stat.statKey} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--soft)' }}>{meta?.label ?? stat.statKey}</span>
+                        <strong style={{ fontSize: 14, color: stat.scorePct >= 70 ? 'var(--green)' : stat.scorePct < 40 ? 'var(--red)' : 'var(--amber)' }}>
+                          {stat.scorePct}점
+                        </strong>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>{stat.note}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Link href="/my" className="btn btn-secondary" style={{ flex: 1, textAlign: 'center' }}>
+              마이페이지에서 기록 보기
+            </Link>
+            <button onClick={handleRestart} className="btn btn-primary" style={{ flex: 1 }}>
+              새 세션 시작하기
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -558,11 +637,11 @@ export default function SimulationClient() {
           <div className="hero">
             <div className="eyebrow">
               <span className="badge">짐</span>
-              스파링 준비 중
+              모의고사 준비 중
             </div>
-            <h1>스파링 기간을 고르면 바로 시작해요</h1>
+            <h1>모의고사 기간을 고르면 바로 시작해요</h1>
             <p className="lede">
-              실제 시세 데이터 중 원하는 구간을 골라 그 기간 동안 모의투자를 진행해요. 신용거래와
+              실제 시세 데이터 중 원하는 구간을 골라 그 기간 동안 모의투자를 진행해요. 미수거래와
               반대매매까지 안전하게 연습할 수 있어요.
             </p>
           </div>
@@ -573,7 +652,7 @@ export default function SimulationClient() {
               ✕
             </Link>
             <div>
-              <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>스파링 기간을 골라주세요</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 19 }}>모의고사 기간을 골라주세요</h2>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
                 실제 시세 데이터 중 시작일과 종료일을 골라 그 기간 동안 모의투자를 진행해요. (최소 {MIN_RANGE_TRADING_DAYS}거래일)
               </p>
@@ -630,7 +709,7 @@ export default function SimulationClient() {
       <TopNav
         right={
           <>
-            스파링 시즌 1 · 2020 급락장에서 살아남기
+            모의고사 · 최대 {session.maxTurns}턴
             <br />내 자산 {session.currentCash.toLocaleString()}원
           </>
         }
@@ -702,6 +781,39 @@ export default function SimulationClient() {
               </button>
             )}
 
+            {/* 턴·기간 진행률 — 둘 중 먼저 끝나는 쪽에서 모의고사가 종료됨 */}
+            <div className="result-card" style={{ minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--soft)' }}>
+                    턴 진행 · {session.turnCount}/{session.maxTurns}턴
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: session.maxTurns - session.turnCount <= 2 ? 'var(--amber)' : 'var(--muted)' }}>
+                    {session.maxTurns - session.turnCount > 0 ? `${session.maxTurns - session.turnCount}턴 남음` : '마지막 턴이에요'}
+                  </span>
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden' }}>
+                  <div style={{ width: `${turnPct}%`, height: '100%', borderRadius: 999, background: 'var(--green)', transition: 'width 0.4s' }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--soft)' }}>
+                    기간 진행 · {session.startTurnDate} ~ {session.targetEndDate}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: periodLeftDays <= 7 ? 'var(--amber)' : 'var(--muted)' }}>
+                    {periodLeftDays > 0 ? `${periodLeftDays}일 남음` : '종료일이에요'}
+                  </span>
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden' }}>
+                  <div style={{ width: `${periodPct}%`, height: '100%', borderRadius: 999, background: periodPct >= turnPct ? 'var(--amber)' : 'var(--green)', transition: 'width 0.4s' }} />
+                </div>
+              </div>
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
+                턴과 기간 중 <b>먼저 끝나는 쪽</b>에서 모의고사가 종료돼요 — 일주일·한달씩 건너뛰면 턴이 남아도 기간이 먼저 끝날 수 있어요.
+              </p>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               {[
                 ['남은 현금', `${session.currentCash.toLocaleString()}원`, undefined],
@@ -721,6 +833,43 @@ export default function SimulationClient() {
                 </div>
               ))}
             </div>
+
+            {borrowedAmount > 0 && (
+              // 미수금 상환 기한 경고 — 10턴 안에 못 갚으면 투자성향 평가에 부정적으로 반영됨(회의 결정).
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  background: session.debtOverdue || (debtTurnsLeft != null && debtTurnsLeft <= 0) ? 'var(--red-chip)' : 'var(--amber-chip)',
+                  color: session.debtOverdue || (debtTurnsLeft != null && debtTurnsLeft <= 0) ? 'var(--red)' : 'var(--amber)',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  lineHeight: 1.6,
+                }}
+              >
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <span style={{ flex: 1 }}>
+                    {session.debtOverdue || (debtTurnsLeft != null && debtTurnsLeft <= 0) ? (
+                      <>미수금 {Math.round(borrowedAmount).toLocaleString()}원의 상환 기한이 지났어요 — 이 기록은 투자성향 평가에 부정적으로 반영돼요. 지금이라도 갚아보세요.</>
+                    ) : (
+                      <>
+                        미수금 {Math.round(borrowedAmount).toLocaleString()}원 · {session.debtDeadlineTurn}턴까지 갚아야 해요 (남은 {debtTurnsLeft}턴).
+                        기한 안에 못 갚으면 투자성향 평가에 부정적으로 반영돼요.
+                      </>
+                    )}
+                  </span>
+                  {/* 현금부터 갚고, 모자라면 보유 종목을 필요한 만큼만 시가 매도해서 갚음(서버 처리) */}
+                  <button
+                    onClick={handleRepayDebt}
+                    disabled={repaying}
+                    className="btn btn-sm"
+                    style={{ flexShrink: 0, background: 'var(--white)', color: 'var(--ink)', border: '1px solid var(--line)', fontWeight: 800 }}
+                  >
+                    {repaying ? '갚는 중...' : '지금 갚기'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="result-card" style={{ minHeight: 0, padding: 16 }}>
               <h3 style={{ fontSize: 13, margin: '0 0 10px' }}>내 포트폴리오</h3>
@@ -812,49 +961,6 @@ export default function SimulationClient() {
 
             <div className="result-card" style={{ minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <h3 style={{ fontSize: 13, margin: 0 }}>{active.stockName} 주문</h3>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['MARKET', 'LIMIT'] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setOrderType(t)}
-                    className="btn btn-sm"
-                    style={{
-                      flex: 1,
-                      background: orderType === t ? 'var(--green-chip)' : 'var(--white)',
-                      color: orderType === t ? 'var(--green)' : 'var(--soft)',
-                      border: `1px solid ${orderType === t ? 'transparent' : 'var(--line)'}`,
-                      fontWeight: orderType === t ? 800 : 600,
-                    }}
-                  >
-                    {t === 'MARKET' ? '시장가' : '지정가'}
-                  </button>
-                ))}
-              </div>
-              {orderType === 'LIMIT' && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>희망 가격</span>
-                  <input
-                    type="number"
-                    value={limitPriceInput}
-                    onChange={(e) => setLimitPriceInput(e.target.value)}
-                    placeholder={`예: ${active.openPrice.toLocaleString()}`}
-                    style={{
-                      width: 160,
-                      height: 36,
-                      borderRadius: 8,
-                      border: '1px solid var(--line)',
-                      padding: '0 10px',
-                      fontSize: 13,
-                      textAlign: 'right',
-                    }}
-                  />
-                </div>
-              )}
-              {orderType === 'LIMIT' && (
-                <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
-                  오늘 저가~고가 범위 안이면 그 가격에 체결돼요. 범위는 매매를 시도하기 전엔 안 보여줘요 — 실제 지정가 주문처럼요.
-                </p>
-              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>수량</span>
                 <div style={{ display: 'flex', alignItems: 'center', background: 'var(--chip)', borderRadius: 10 }}>
@@ -873,9 +979,45 @@ export default function SimulationClient() {
                   </button>
                 </div>
               </div>
+              {/* 총 자산(현금+보유평가) 대비 몇 %어치를 살지 — 누르면 그 금액만큼의 수량으로 맞춰줌.
+                  100%는 현금을 넘을 수 있는데, 그땐 부족분이 자동으로 미수로 잡힘(아래 경고 참고). */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, flexShrink: 0 }}>총 자산 대비</span>
+                <div style={{ display: 'flex', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
+                  {[10, 25, 50, 100].map((pct) => {
+                    const pctQuantity = Math.max(1, Math.floor((portfolioValue * pct) / 100 / active.openPrice));
+                    const isActive = quantity === pctQuantity;
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => setQuantity(pctQuantity)}
+                        className="btn btn-sm"
+                        title={`약 ${Math.round((portfolioValue * pct) / 100).toLocaleString()}원어치 (${pctQuantity}주)`}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          background: isActive ? 'var(--green-chip)' : 'var(--white)',
+                          color: isActive ? 'var(--green)' : 'var(--soft)',
+                          border: `1px solid ${isActive ? 'transparent' : 'var(--line)'}`,
+                          fontWeight: isActive ? 800 : 600,
+                        }}
+                      >
+                        {pct}%
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
-                예상 금액 {estimate.toLocaleString()}원 ({orderType === 'MARKET' ? '시장가 · 시가 기준' : '지정가 기준(체결 안 될 수 있음)'}) · 신용거래 시 1.5배 표기
+                예상 금액 {estimate.toLocaleString()}원 (시장가 · 시가 기준) · 총 자산의{' '}
+                {portfolioValue > 0 ? Math.round((estimate / portfolioValue) * 100) : 0}%
               </p>
+              {estimate > session.currentCash && (
+                <p style={{ margin: 0, fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
+                  현금을 {Math.round(estimate - session.currentCash).toLocaleString()}원 넘는 매수예요 — 부족분은
+                  미수(빌린 돈)로 잡히고 10턴 안에 갚아야 해요.
+                </p>
+              )}
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                 매수·매도 버튼을 누르면 판단한 이유를 적는 메모창이 떠요.
               </p>
@@ -893,18 +1035,6 @@ export default function SimulationClient() {
                 </button>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => setCredit((c) => !c)}
-                  className="btn btn-sm"
-                  style={{
-                    flex: 1,
-                    background: credit ? 'var(--amber-chip)' : 'var(--white)',
-                    color: 'var(--amber)',
-                    border: '1px solid var(--amber)',
-                  }}
-                >
-                  신용거래 (1.5배)
-                </button>
                 <select
                   value={turnUnitChoice}
                   onChange={(e) => setTurnUnitChoice(e.target.value as TurnUnit)}
@@ -943,40 +1073,39 @@ export default function SimulationClient() {
             </div>
           </section>
 
-          {/* right: ranking — 완료된 세션들 중 유저별 최고 수익률 기준 */}
-          <aside className="result-card" style={{ minHeight: 0, padding: 20 }}>
-            <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>이번 시즌 랭킹</h3>
-            <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--muted)' }}>
-              스파링 시즌 1 · 수익률 기준
-            </p>
-            {ranking.length === 0 ? (
+          {/* right: DART 공시 요약 — 매수 전 확인해야 할 판단요소. "열어본" 행동이
+              viewedDisclosure로 매매 기록에 남아 공시 확인율 스탯의 원천이 된다. */}
+          <aside className="result-card" style={{ minHeight: 0, padding: 20, alignSelf: 'start', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>DART 공시 요약</h3>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
-                아직 종료된 세션이 없어요. 스파링을 끝까지 마치면 랭킹에 올라가요.
+                {active.stockName} · 전자공시시스템 기준
+              </p>
+            </div>
+            {!disclosureOpen ? (
+              <>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--soft)', lineHeight: 1.6 }}>
+                  매수 전에 이 종목의 최근 공시를 확인해보세요. 열어본 기록은 공시 확인율 스탯에
+                  반영돼요.
+                </p>
+                <button onClick={openDisclosure} className="btn btn-secondary btn-sm btn-block">
+                  공시 요약 열어보기
+                </button>
+              </>
+            ) : disclosure == null ? (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>불러오는 중...</p>
+            ) : disclosure.items.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+                이 시점까지 등록된 공시가 없어요.
               </p>
             ) : (
-              ranking.map((r) => (
-                <div
-                  key={r.username}
-                  style={{
-                    display: 'flex',
-                    gap: 10,
-                    alignItems: 'center',
-                    padding: '10px',
-                    borderRadius: 10,
-                    background: r.isMe ? 'var(--green-chip)' : 'transparent',
-                  }}
-                >
-                  <span style={{ width: 16, fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--muted)' }}>
-                    {r.rank}
-                  </span>
-                  <span style={{ flex: 1, fontSize: 13, fontWeight: r.isMe ? 800 : 600, color: r.isMe ? 'var(--green)' : 'var(--ink)' }}>
-                    {r.username}
-                    {r.isMe ? ' (나)' : ''}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: r.isMe ? 'var(--green)' : 'var(--soft)' }}>
-                    {r.returnPct >= 0 ? '+' : ''}
-                    {r.returnPct.toFixed(1)}%
-                  </span>
+              disclosure.items.map((item) => (
+                <div key={`${item.disclosedDate}-${item.title}`} style={{ borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
+                    <strong style={{ fontSize: 12.5, flex: 1 }}>{item.title}</strong>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{item.disclosedDate}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--soft)', lineHeight: 1.6 }}>{item.summary}</p>
                 </div>
               ))
             )}
@@ -1064,6 +1193,30 @@ export default function SimulationClient() {
         <ForcedLiquidationModal trades={liquidationEvent} onClose={() => setLiquidationEvent(null)} />
       )}
       {actionResult && <ActionResultModal result={actionResult} onClose={() => setActionResult(null)} />}
+      {ending && (
+        // 종료 요청 동안 서버가 AI 채점(턴 기록+메모 전체 분석)을 돌리는 중 — 몇 초~수십 초 걸릴 수 있음.
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ textAlign: 'center', alignItems: 'center', gap: 14 }}>
+            <span
+              aria-hidden
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 999,
+                border: '4px solid var(--green-chip)',
+                borderTopColor: 'var(--green)',
+                animation: 'kb-spin 0.9s linear infinite',
+              }}
+            />
+            <h2 style={{ margin: 0, fontSize: 17 }}>이번 모의고사 기록으로 투자 성향을 분석 중이에요</h2>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+              턴마다 남긴 매매 이유까지 AI가 전부 읽고 8개 지표를 채점해요.
+              <br />조금만 기다려주세요.
+            </p>
+            <style>{`@keyframes kb-spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1406,7 +1559,7 @@ function RiskInterventionModal({
         </div>
         <h2 style={{ margin: 0, fontSize: 22 }}>잠깐, 이 매매는 위험해요</h2>
         <p style={{ margin: 0, fontSize: 14, color: 'var(--soft)', lineHeight: 1.6 }}>
-          지금 신용매수 {quantity}를 진행하면 담보비율이 {ratioLabel}까지
+          지금 미수 매수 {quantity}를 진행하면 담보비율이 {ratioLabel}까지
           떨어져요. {riskIntervention.liquidationThreshold} 아래로 내려가면 — 내 의사와 상관없이
           반대매매가 발생할 수 있어요.
         </p>
@@ -1494,7 +1647,7 @@ function ForcedLiquidationModal({ trades, onClose }: { trades: TradeResponse[]; 
         </div>
         <h2 style={{ margin: 0, fontSize: 22 }}>담보비율 미달로 강제 매도됐어요</h2>
         <p style={{ margin: 0, fontSize: 14, color: 'var(--soft)', lineHeight: 1.6 }}>
-          신용으로 빌린 돈에 비해 보유 자산 가치가 {(MAINTENANCE_RATIO * 100).toFixed(0)}% 아래로
+          미수로 빌린 돈에 비해 보유 자산 가치가 {(MAINTENANCE_RATIO * 100).toFixed(0)}% 아래로
           떨어져서, 내 의사와 상관없이 보유 종목이 전부 그날 시가로 팔렸어요. 실전 계좌였다면 똑같은
           일이 일어났을 거예요.
         </p>

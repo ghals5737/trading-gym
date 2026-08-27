@@ -341,7 +341,7 @@ export default function PtClient() {
                 <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{error}</p>
                 {error.includes('세션이 없') ? (
                   <Link href="/simulation" className="btn btn-primary" style={{ marginTop: 14, display: 'inline-block' }}>
-                    스파링 시작하러 가기
+                    모의고사 보러 가기
                   </Link>
                 ) : (
                   <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={handleNewQuiz}>
@@ -364,7 +364,7 @@ export default function PtClient() {
                   }}
                 >
                   <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.6, color: 'var(--soft)' }}>
-                    최근 스파링 기록을 보니 <b>{SESSION_STAT_LABELS[quiz.targetStatKey].label}</b> 부분을 더 연습하면 좋을 것
+                    최근 모의고사 기록을 보니 <b>{SESSION_STAT_LABELS[quiz.targetStatKey].label}</b> 부분을 더 연습하면 좋을 것
                     같아요.
                   </p>
                   {quiz.sourceTitle && (

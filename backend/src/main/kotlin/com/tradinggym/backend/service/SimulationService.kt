@@ -7,6 +7,8 @@ import com.tradinggym.backend.dto.PricePoint
 import com.tradinggym.backend.dto.QuoteResponse
 import com.tradinggym.backend.dto.SessionResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
+import com.tradinggym.backend.dto.StockDisclosureItemResponse
+import com.tradinggym.backend.dto.StockDisclosureResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
@@ -22,6 +24,7 @@ import com.tradinggym.backend.entity.TurnLog
 import com.tradinggym.backend.entity.TurnUnit
 import com.tradinggym.backend.repository.SimulationSessionRepository
 import com.tradinggym.backend.repository.StockDailyPriceRepository
+import com.tradinggym.backend.repository.StockDisclosureRepository
 import com.tradinggym.backend.repository.StockNewsRepository
 import com.tradinggym.backend.repository.TradeRepository
 import com.tradinggym.backend.repository.TurnLogRepository
@@ -45,6 +48,7 @@ class SimulationService(
 	private val tradeRepository: TradeRepository,
 	private val stockDailyPriceRepository: StockDailyPriceRepository,
 	private val stockNewsRepository: StockNewsRepository,
+	private val stockDisclosureRepository: StockDisclosureRepository,
 	private val turnLogRepository: TurnLogRepository,
 	private val sessionSummaryService: SessionSummaryService,
 ) {
@@ -80,7 +84,7 @@ class SimulationService(
 				currentCash = request.startingCash,
 				currentTurnDate = request.currentTurnDate,
 				targetEndDate = request.targetEndDate,
-			),
+			).apply { startTurnDate = request.currentTurnDate },
 		)
 		// 1턴째를 미리 열어둠 — 이후 trade가 생기는 즉시 turn_log_id를 붙일 수 있어야 해서.
 		turnLogRepository.save(
@@ -201,6 +205,17 @@ class SimulationService(
 		return StockNewsResponse(headline = latest.headline, summary = latest.summary, source = latest.source, tradeDate = latest.tradeDate)
 	}
 
+	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 것 중 최신 3건.
+	// 매수 전 "공시 확인" 판단요소용 — 프론트가 이 패널을 연 채로 매매하면
+	// CreateTradeRequest.viewedDisclosure=true로 기록돼 공시 확인율 스탯의 원천이 됨.
+	fun getStockDisclosures(username: String, sessionId: UUID, stockCode: String): StockDisclosureResponse {
+		val session = requireOwnedSession(username, sessionId)
+		val items = stockDisclosureRepository
+			.findTop3ByStockCodeAndDisclosedDateLessThanEqualOrderByDisclosedDateDesc(stockCode, session.currentTurnDate)
+			.map { StockDisclosureItemResponse(title = it.title, summary = it.summary, disclosedDate = it.disclosedDate) }
+		return StockDisclosureResponse(stockCode = stockCode, items = items)
+	}
+
 	@Transactional
 	fun recordTrade(username: String, sessionId: UUID, request: CreateTradeRequest): TradeResponse {
 		val session = requireOwnedActiveSession(username, sessionId)
@@ -211,9 +226,6 @@ class SimulationService(
 			throw ResponseStatusException(HttpStatus.BAD_REQUEST, "HOLD는 직접 매매로 기록할 수 없어요")
 		}
 
-		if (request.orderType == TradeOrderType.LIMIT && request.limitPrice == null) {
-			throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지정가 주문은 limitPrice가 필요해요")
-		}
 		if (request.reasonText.isBlank()) {
 			throw ResponseStatusException(HttpStatus.BAD_REQUEST, "매매 이유를 입력해주세요")
 		}
@@ -228,39 +240,33 @@ class SimulationService(
 		// 부른 가격은 절대 신뢰하지 않음(모의투자 API 설계 논의에서 정정된 부분).
 		val marketPrice = requireMarketPrice(request.stockCode, session.currentTurnDate)
 
-		val filled: Boolean
-		val executionPrice: BigDecimal?
-		when (request.orderType) {
-			TradeOrderType.MARKET -> {
-				filled = true
-				executionPrice = marketPrice.openPrice
-			}
-			TradeOrderType.LIMIT -> {
-				val limitPrice = requireNotNull(request.limitPrice)
-				filled = limitPrice in marketPrice.lowPrice..marketPrice.highPrice
-				executionPrice = if (filled) limitPrice else null
-			}
-		}
+		// 지정가 주문은 회의 결정으로 제거됨 — 시장가(그날 시가) 체결만 남음.
+		val filled = true
+		val executionPrice: BigDecimal = marketPrice.openPrice
 
-		// 신용매수 증거금 계산 — leverageRatio=1.5면 포지션 금액의 1/1.5(≈67%)만 현금에서 빠지고
-		// 나머지가 대출로 잡힘. 현금이 증거금보다 부족하면 아예 거부(그동안은 검증이 없었음).
-		var marginRequired: BigDecimal? = null
+		// 미수(신용) 매수 — 별도 토글 없이, 현금보다 큰 금액을 매수하면 부족분이 자동으로
+		// 미수금(빌린 돈)으로 잡힘(실제 미수거래처럼 계좌를 마이너스로 당기는 개념).
+		// 한도는 담보비율: 매수 직후 (현금+보유평가)/미수금이 유지비율(140%) 아래로
+		// 떨어지는 매수는 거부 — 허용하면 사자마자 반대매매가 나가는 자멸 매수가 됨.
+		var cashPaid: BigDecimal? = null
 		var borrowedPortion: BigDecimal? = null
 		if (filled && request.side == TradeSide.BUY) {
-			val positionValue = requireNotNull(executionPrice).multiply(BigDecimal(request.quantity))
-			if (request.isCredit) {
-				val leverageRatio = request.leverageRatio?.takeIf { it > BigDecimal.ONE } ?: BigDecimal.ONE
-				marginRequired = positionValue.divide(leverageRatio, 4, RoundingMode.HALF_UP)
-				borrowedPortion = positionValue.subtract(marginRequired)
-			} else {
-				marginRequired = positionValue
-				borrowedPortion = BigDecimal.ZERO
-			}
-			if (marginRequired > session.currentCash) {
-				throw ResponseStatusException(
-					HttpStatus.BAD_REQUEST,
-					"현금이 부족해요 (필요 증거금 ${marginRequired.toPlainString()}원, 보유 현금 ${session.currentCash.toPlainString()}원)",
-				)
+			val positionValue = executionPrice.multiply(BigDecimal(request.quantity))
+			val shortfall = positionValue.subtract(session.currentCash).max(BigDecimal.ZERO)
+			cashPaid = positionValue.subtract(shortfall)
+			borrowedPortion = shortfall
+			if (shortfall > BigDecimal.ZERO) {
+				val equityAfter = session.currentCash.subtract(cashPaid)
+					.add(computeHoldingsValue(session))
+					.add(positionValue)
+				val borrowedAfter = session.borrowedAmount.add(shortfall)
+				val ratioAfter = equityAfter.divide(borrowedAfter, 4, RoundingMode.HALF_UP)
+				if (ratioAfter < MAINTENANCE_RATIO) {
+					throw ResponseStatusException(
+						HttpStatus.BAD_REQUEST,
+						"미수 한도를 넘었어요 — 이 매수를 하면 담보비율이 ${ratioAfter.multiply(BigDecimal(100)).toInt()}%로 유지비율(140%) 아래로 떨어져요",
+					)
+				}
 			}
 		}
 
@@ -272,11 +278,9 @@ class SimulationService(
 				stockCode = marketPrice.stockCode,
 				stockName = marketPrice.stockName,
 				side = request.side,
-				orderType = request.orderType,
-				limitPrice = request.limitPrice,
+				orderType = TradeOrderType.MARKET,
 				filled = filled,
-				isCredit = request.isCredit,
-				leverageRatio = request.leverageRatio,
+				isCredit = (borrowedPortion ?: BigDecimal.ZERO) > BigDecimal.ZERO, // 미수가 낀 매수였는지 — 서버가 판단
 				quantity = request.quantity,
 				price = executionPrice,
 				dayOpenPrice = marketPrice.openPrice,
@@ -291,12 +295,18 @@ class SimulationService(
 		if (filled) {
 			when (request.side) {
 				TradeSide.BUY -> {
-					session.currentCash = session.currentCash.subtract(requireNotNull(marginRequired))
+					val hadNoDebt = session.borrowedAmount <= BigDecimal.ZERO
+					session.currentCash = session.currentCash.subtract(requireNotNull(cashPaid))
 					session.borrowedAmount = session.borrowedAmount.add(requireNotNull(borrowedPortion))
+					// 미수금이 이번 매수로 처음 생겼으면 발생 턴을 기록 — 10턴 상환 기한의 기준점.
+					if (hadNoDebt && session.borrowedAmount > BigDecimal.ZERO) {
+						session.debtOpenedTurnNumber = session.turnCount
+					}
 				}
 				TradeSide.SELL -> {
-					val amount = requireNotNull(executionPrice).multiply(BigDecimal(request.quantity))
+					val amount = executionPrice.multiply(BigDecimal(request.quantity))
 					session.currentCash = session.currentCash.add(amount)
+					repayDebtFromCash(session) // 매도 대금이 들어오면 미수금부터 자동 상환
 				}
 				TradeSide.HOLD -> {} // 이 함수 초입에서 이미 거부됨 — when 완전성용
 			}
@@ -315,7 +325,7 @@ class SimulationService(
 	// currentTurnDate를 요청받은 turnUnit(하루/일주일/한달)만큼 건너뛴 다음, 그 시점 이후
 	// 첫 실제 거래일로 스냅함 — turnUnit은 세션 고정값이 아니라 턴 넘길 때마다 매번 고름.
 	// "거래일 캘린더"는 stock_daily_prices에 실제로 데이터가 있는 날짜들 그 자체 —
-	// 주말/공휴일은 자연히 빠짐. MAX_TURNS(20)에 도달하면 더 진행 못 함.
+	// 주말/공휴일은 자연히 빠짐. MAX_TURNS(10)에 도달하면 더 진행 못 함.
 	@Transactional
 	fun advanceTurn(username: String, sessionId: UUID, request: AdvanceTurnRequest): SessionResponse {
 		val session = requireOwnedActiveSession(username, sessionId)
@@ -379,6 +389,13 @@ class SimulationService(
 		// 밤새(또는 며칠/몇 주 사이) 가격이 움직여서 담보비율이 무너질 수 있음 — 턴 넘길 때도 체크.
 		// 이 시점에 강제청산이 나오면 새로 연 turnLog(새 턴)에 붙음.
 		checkMarginCall(session, newTurnLog)
+		// 미수금 상환 기한(발생 턴 + DEBT_REPAY_TURN_LIMIT) 초과 체크 — 반대매매와 별개로,
+		// 기한을 넘긴 사실 자체를 세션에 남겨서 AI 스탯 채점에 "부정적 반영" 근거로 쓴다.
+		val deadline = session.debtOpenedTurnNumber?.plus(DEBT_REPAY_TURN_LIMIT)
+		if (!session.debtOverdue && deadline != null && session.borrowedAmount > BigDecimal.ZERO && session.turnCount > deadline) {
+			session.debtOverdue = true
+			sessionRepository.save(session)
+		}
 		return session.toResponse()
 	}
 
@@ -455,8 +472,83 @@ class SimulationService(
 			)
 			session.currentCash = session.currentCash.add(price.openPrice.multiply(BigDecimal(quantity)))
 		}
+		// 청산 대금으로 대출을 실제로 갚음 — 예전엔 borrowedAmount만 0으로 지워서 빌린 돈이
+		// 현금에 그대로 남는(수익률이 부풀려지는) 문제가 있었음. 현금이 모자라면 남은 빚은
+		// 탕감 처리(교육 시나리오 단순화 — "빚만 남았다"는 메시지는 반대매매 경고로 충분).
+		repayDebtFromCash(session)
 		session.borrowedAmount = BigDecimal.ZERO
+		session.debtOpenedTurnNumber = null
 		sessionRepository.save(session)
+	}
+
+	// "미수금 갚기" 버튼 — 현금부터 갚고, 모자라면 보유 종목을 시가로 "필요한 만큼만"
+	// 매도해서 갚음(반대매매처럼 전량 청산하지 않음 — 자발적 상환이라는 게 교육 포인트).
+	// 매도 기록은 일반 SELL로 남고 이유 텍스트로 상환 목적임이 드러남 — AI 채점이 이걸 읽으면
+	// "기한 안에 스스로 갚았다"는 긍정 신호가 됨.
+	@Transactional
+	fun repayDebt(username: String, sessionId: UUID): SessionResponse {
+		val session = requireOwnedActiveSession(username, sessionId)
+		if (session.borrowedAmount <= BigDecimal.ZERO) {
+			throw ResponseStatusException(HttpStatus.BAD_REQUEST, "갚을 미수금이 없어요")
+		}
+		val currentTurnLog = requireCurrentTurnLog(session)
+
+		repayDebtFromCash(session) // 1순위: 현금
+
+		if (session.borrowedAmount > BigDecimal.ZERO) {
+			// 2순위: 보유 종목을 필요한 만큼만 매도 — 평가액 큰 종목부터.
+			val holdings = computeHoldingsQuantities(requireNotNull(session.id))
+			val priced = holdings.mapNotNull { (stockCode, quantity) ->
+				val price = stockDailyPriceRepository.findByStockCodeAndTradeDate(stockCode, session.currentTurnDate)
+					?: return@mapNotNull null
+				Triple(price, quantity, price.openPrice.multiply(BigDecimal(quantity)))
+			}.sortedByDescending { it.third }
+
+			for ((price, ownedQuantity) in priced.map { it.first to it.second }) {
+				if (session.borrowedAmount <= BigDecimal.ZERO) break
+				val needed = session.borrowedAmount
+					.divide(price.openPrice, 0, RoundingMode.UP)
+					.toInt()
+					.coerceAtMost(ownedQuantity)
+				if (needed <= 0) continue
+				tradeRepository.save(
+					Trade(
+						session = session,
+						turnLog = currentTurnLog,
+						turnNumber = currentTurnLog.turnNumber,
+						stockCode = price.stockCode,
+						stockName = price.stockName,
+						side = TradeSide.SELL,
+						orderType = TradeOrderType.MARKET,
+						filled = true,
+						quantity = needed,
+						price = price.openPrice,
+						dayOpenPrice = price.openPrice,
+						dayHighPrice = price.highPrice,
+						dayLowPrice = price.lowPrice,
+						reasonText = "미수금 상환을 위해 매도했어요",
+						simulatedTradeDate = session.currentTurnDate,
+					),
+				)
+				session.currentCash = session.currentCash.add(price.openPrice.multiply(BigDecimal(needed)))
+				repayDebtFromCash(session)
+			}
+		}
+
+		sessionRepository.save(session)
+		return session.toResponse()
+	}
+
+	// 현금이 있는 만큼 미수금을 갚음 — SELL 정산과 반대매매 정리가 같이 씀.
+	// 전액 상환되면 발생 턴 기록도 지워서 상환 기한 경고가 사라지게 함.
+	private fun repayDebtFromCash(session: SimulationSession) {
+		if (session.borrowedAmount <= BigDecimal.ZERO) return
+		val repay = session.borrowedAmount.min(session.currentCash)
+		session.currentCash = session.currentCash.subtract(repay)
+		session.borrowedAmount = session.borrowedAmount.subtract(repay)
+		if (session.borrowedAmount <= BigDecimal.ZERO) {
+			session.debtOpenedTurnNumber = null
+		}
 	}
 
 	// 세션의 현재 시가 기준 보유종목 평가액 — checkMarginCall의 equity 계산과 같은 방식이지만
@@ -522,7 +614,11 @@ class SimulationService(
 
 	companion object {
 		private val MAINTENANCE_RATIO = BigDecimal("1.4") // 담보 유지비율 140% (RiskInterventionModal mock 수치와 동일)
-		const val MAX_TURNS = 20 // 세션당 최대 턴 수 — 턴 단위(하루/일주일/한달)와 무관하게 동일하게 적용
+		const val MAX_TURNS = 10 // 세션당 최대 턴 수 — 턴 단위(하루/일주일/한달)와 무관하게 동일하게 적용 (회의 결정: 10턴)
+
+		// 미수금(신용매수 대출) 상환 기한 — 발생 턴부터 이 턴 수 안에 못 갚으면
+		// debtOverdue가 켜지고 투자성향(스탯) 채점에 부정적으로 반영됨.
+		const val DEBT_REPAY_TURN_LIMIT = 10
 
 		// 사용자가 고르는 시작일~종료일 사이에 최소 이만큼의 실제 거래일은 있어야 함 —
 		// MAX_TURNS와 같은 수치로 맞춰서, 제일 촘촘한 하루 단위로 20턴을 다 채워도
@@ -545,6 +641,10 @@ private fun SimulationSession.toResponse() = SessionResponse(
 	startingCash = startingCash,
 	currentCash = currentCash,
 	borrowedAmount = borrowedAmount,
+	debtOpenedTurnNumber = debtOpenedTurnNumber,
+	debtDeadlineTurn = debtOpenedTurnNumber?.plus(SimulationService.DEBT_REPAY_TURN_LIMIT),
+	debtOverdue = debtOverdue,
+	startTurnDate = startTurnDate ?: currentTurnDate, // 예전 세션(컬럼 없던 시절)은 현재 턴 날짜로 대체
 	currentTurnDate = currentTurnDate,
 	targetEndDate = targetEndDate,
 	turnCount = turnCount,
