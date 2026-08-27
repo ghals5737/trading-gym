@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import LoginButton from '../../components/LoginButton';
+import StatTriangleChart from '../../components/StatTriangleChart';
 import { aiCharacter, user } from '../../lib/mock-data';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { RISK_COPY, KNOWLEDGE_COPY, INFO_HABIT_COPY, headlineFor, warningFor, courseFor } from '../../lib/onboarding-copy';
@@ -325,22 +326,22 @@ function DiagnosisTab() {
       )}
 
       <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">리스크 성향</span>
           <h3>{risk.label}</h3>
           <p>{risk.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">투자 지식</span>
           <h3>{knowledge.label}</h3>
           <p>{knowledge.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">정보 습관</span>
           <h3>{infoHabit.label}</h3>
           <p>{infoHabit.detail}</p>
         </div>
-        <div className="result-card">
+        <div className="result-card" data-knower-seat="">
           <span className="result-tag">추천</span>
           <h3>{course}</h3>
           <p>{courseDetail}</p>
@@ -351,7 +352,7 @@ function DiagnosisTab() {
         <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
           {new Date(profile.createdAt).toLocaleDateString('ko-KR')}에 진단한 결과예요.
         </p>
-        <Link href="/onboarding?retake=1" className="btn btn-secondary btn-sm">
+        <Link href="/onboarding?retake=1" className="btn btn-secondary btn-sm" data-knower-swing-seat="">
           다시 진단받기
         </Link>
       </div>
@@ -439,8 +440,9 @@ function PeerComparisonCard() {
 
 const STAT_KEYS = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
 
-// 모의투자 세션을 마칠 때마다 AI가 채점해 쌓이는 8개 지표 — 사전조사 결과(진단 탭)와
-// 다르게 세션이 없으면 보여줄 게 없어서(mock 폴백 없음), 빈 상태를 그대로 안내함.
+// 모의투자 세션을 마칠 때마다 AI가 채점하는 8개 세부 지표를 정확성/침착성/공격성 3개
+// 성향으로 묶어 평균 낸 값 — 사전조사 결과(진단 탭)와 다르게 세션이 없으면 보여줄 게
+// 없어서(mock 폴백 없음), 빈 상태를 그대로 안내함.
 function StatsTab() {
   const [overview, setOverview] = useState<StatOverviewResponse | null>(null);
   const [history, setHistory] = useState<SessionHistoryItemResponse[]>([]);
@@ -478,6 +480,12 @@ function StatsTab() {
 
   const sessionCount = Math.max(...stats.map((s) => s.sessionCount));
   const quizCount = stats.reduce((sum, s) => sum + s.quizCount, 0);
+  // 삼각형 레이더 차트(ksj) — 3분류 점수를 한눈에. overview의 카테고리 점수를 그대로 씀.
+  const chartPoints = (overview?.categories ?? []).map((cat) => ({
+    key: cat.category,
+    label: cat.label,
+    value: cat.scorePct,
+  }));
 
   return (
     <>
@@ -520,6 +528,11 @@ function StatsTab() {
         완료한 모의고사 {sessionCount}회{quizCount > 0 ? ` · 푼 퀴즈 ${quizCount}개` : ''}의 결과를 합쳐 지표별 평균을 냈어요. 더 진행하면 계속
         업데이트돼요.
       </p>
+      {chartPoints.length === 3 && (
+        <div className="result-card" style={{ padding: '20px 12px' }}>
+          <StatTriangleChart points={chartPoints} />
+        </div>
+      )}
       <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
         {STAT_KEYS.map((key) => {
           const { label, suffix, desc } = SESSION_STAT_LABELS[key];

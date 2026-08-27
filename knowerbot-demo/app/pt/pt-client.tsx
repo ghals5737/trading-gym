@@ -132,6 +132,7 @@ export default function PtClient() {
       sourceTitle: item.sourceTitle,
       sourcePageStart: item.sourcePageStart,
       sourcePageEnd: item.sourcePageEnd,
+      sourceSessionId: item.sourceSessionId,
       createdAt: item.createdAt,
     });
   }
@@ -378,6 +379,7 @@ export default function PtClient() {
                 </div>
 
                 <div
+                  data-knower-seat=""
                   style={{
                     background: 'var(--white)',
                     border: '1px solid var(--line)',
@@ -439,7 +441,7 @@ export default function PtClient() {
                   <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleNewQuiz}>
                     새 문제 만들기
                   </button>
-                  <Link href="/my" className="btn btn-primary" style={{ flex: 1, textAlign: 'center' }}>
+                  <Link href="/my" className="btn btn-primary" style={{ flex: 1, textAlign: 'center' }} data-knower-swing-seat="">
                     학습 완료하고 리포트 보기
                   </Link>
                 </div>

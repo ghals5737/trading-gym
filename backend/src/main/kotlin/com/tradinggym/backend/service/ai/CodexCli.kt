@@ -14,7 +14,7 @@ object CodexCli {
 	fun run(prompt: String, timeoutSeconds: Long = 45): String? {
 		val outputFile = File.createTempFile("codex-onboarding-", ".txt")
 		return try {
-			val process = ProcessBuilder(
+			val builder = ProcessBuilder(
 				"codex", "exec",
 				"--skip-git-repo-check",
 				"--sandbox", "read-only",
@@ -26,7 +26,11 @@ object CodexCli {
 				// 즉시 EOF를 줘야 함(직접 셸에서 실행할 땐 터미널 stdin이 바로 EOF라 안 드러났던 버그).
 				.redirectInput(File("/dev/null"))
 				.redirectErrorStream(true)
-				.start()
+			// 백엔드를 실행한 셸이 (지금은 닫힌) cmux 세션이 남긴 죽은 NODE_OPTIONS를 물려받고
+			// 있으면 codex가 즉시 MODULE_NOT_FOUND로 죽음 — codex는 Node.js 기반이라 이 값을
+			// 서브프로세스 환경에서 지워야 함(edu-rag-indexer/articlegen.py에서 겪은 것과 동일한 버그).
+			builder.environment().remove("NODE_OPTIONS")
+			val process = builder.start()
 			val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
 			if (!finished) {
 				process.destroyForcibly()

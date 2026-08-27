@@ -42,6 +42,7 @@ data class TurnSummaryResponse(
 	val portfolioValue: BigDecimal,
 	val borrowedAmount: BigDecimal,
 	val trades: List<TradeSummaryResponse>,
+	val news: List<TurnNewsResponse>, // 이 턴이 걸쳐 있던 기간에 실제로 있었던 뉴스(TurnLogDtos 참고)
 )
 
 data class TradeSummaryResponse(

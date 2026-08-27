@@ -7,6 +7,7 @@ import com.tradinggym.backend.dto.QuizHistoryItemResponse
 import com.tradinggym.backend.entity.PersonalizedQuiz
 import com.tradinggym.backend.entity.PersonalizedQuizOption
 import com.tradinggym.backend.entity.SessionStatKey
+import com.tradinggym.backend.entity.UserEntity
 import com.tradinggym.backend.repository.PersonalizedQuizOptionRepository
 import com.tradinggym.backend.repository.PersonalizedQuizRepository
 import com.tradinggym.backend.repository.UserJpaRepository
@@ -26,6 +27,7 @@ import java.util.UUID
 class QuizGenerationService(
 	private val userJpaRepository: UserJpaRepository,
 	private val aggregateStatService: AggregateStatService,
+	private val sessionSummaryService: SessionSummaryService,
 	private val educationSearchClient: EducationSearchClient,
 	private val quizGenerator: QuizGenerator,
 	private val quizRepository: PersonalizedQuizRepository,
@@ -36,15 +38,34 @@ class QuizGenerationService(
 
 	@Transactional
 	fun generateForUser(username: String): PersonalizedQuizResponse {
-		val user = userJpaRepository.findByUsername(username)
-			?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다")
-
+		val user = requireUser(username)
 		val stats = aggregateStatService.getMyAggregateStats(username)
 		val weakest = stats.minByOrNull { it.avgScorePct }
 			?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "아직 완료한 모의고사가 없어서 맞춤 문제를 만들 수 없어요. 모의고사를 먼저 끝내주세요.")
+		return generateAndSave(user, weakest.statKey, sourceSessionId = null)
+	}
 
-		val label = SessionStatCatalog.LABEL.getValue(weakest.statKey)
-		val searchQuery = SessionStatCatalog.SEARCH_QUERY.getValue(weakest.statKey)
+	// generateForUser와 달리 유저 전체 평균이 아니라 방금 끝난 세션 "하나"의 스탯만 보고
+	// 약점을 고름 — 모의고사를 마치자마자 그 세션 결과로만 문제를 내주는 기능.
+	// getSessionStats는 세션이 이미 완료돼 session_stats에 저장돼있으면 그걸 쓰고, 아직이면
+	// 그 자리에서 라이브 계산함(SessionSummaryService 참고) — 진행 중인 세션에도 쓸 수 있음.
+	@Transactional
+	fun generateForSession(username: String, sessionId: UUID): PersonalizedQuizResponse {
+		val user = requireUser(username)
+		val stats = sessionSummaryService.getSessionStats(username, sessionId)
+		val weakest = stats.minByOrNull { it.scorePct }
+			?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 세션에는 채점된 지표가 없어서 문제를 만들 수 없어요.")
+		return generateAndSave(user, weakest.statKey, sourceSessionId = sessionId)
+	}
+
+	private fun requireUser(username: String): UserEntity =
+		userJpaRepository.findByUsername(username)
+			?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다")
+
+	private fun generateAndSave(user: UserEntity, statKey: SessionStatKey, sourceSessionId: UUID?): PersonalizedQuizResponse {
+		// 라벨·검색어 매핑은 SessionStatCatalog 한 곳(자료실 추천과 공유)
+		val label = SessionStatCatalog.LABEL.getValue(statKey)
+		val searchQuery = SessionStatCatalog.SEARCH_QUERY.getValue(statKey)
 		val sources = educationSearchClient.search(searchQuery, topK = 3)
 
 		val generated = quizGenerator.generate(QuizGenerationInput(targetStatLabel = label, sourceExcerpts = sources, promptVersion = promptVersion))
@@ -54,13 +75,14 @@ class QuizGenerationService(
 		val quiz = quizRepository.save(
 			PersonalizedQuiz(
 				user = user,
-				targetStatKey = weakest.statKey,
+				targetStatKey = statKey,
 				question = generated.question,
 				explanation = generated.explanation,
 				sourceOrgName = topSource?.orgName,
 				sourceTitle = topSource?.title,
 				sourcePageStart = topSource?.pageStart,
 				sourcePageEnd = topSource?.pageEnd,
+				sourceSessionId = sourceSessionId,
 			),
 		)
 		val options = generated.options.mapIndexed { index, label ->
@@ -97,6 +119,7 @@ class QuizGenerationService(
 				sourceTitle = quiz.sourceTitle,
 				sourcePageStart = quiz.sourcePageStart,
 				sourcePageEnd = quiz.sourcePageEnd,
+				sourceSessionId = quiz.sourceSessionId,
 				createdAt = quiz.createdAt,
 			)
 		}
@@ -132,5 +155,6 @@ private fun PersonalizedQuiz.toResponse(options: List<PersonalizedQuizOption>) =
 	sourceTitle = sourceTitle,
 	sourcePageStart = sourcePageStart,
 	sourcePageEnd = sourcePageEnd,
+	sourceSessionId = sourceSessionId,
 	createdAt = createdAt,
 )

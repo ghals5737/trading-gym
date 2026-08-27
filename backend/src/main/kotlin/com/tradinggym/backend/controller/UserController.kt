@@ -1,6 +1,7 @@
 package com.tradinggym.backend.controller
 
 import com.tradinggym.backend.dto.AgeBandResponse
+import com.tradinggym.backend.dto.AggregateStatCategoryResponse
 import com.tradinggym.backend.dto.AggregateStatResponse
 import com.tradinggym.backend.dto.PeerComparisonResponse
 import com.tradinggym.backend.dto.ProductTourStatusResponse
@@ -59,4 +60,9 @@ class UserController(
 			?: return ResponseEntity.noContent().build()
 		return ResponseEntity.ok(overview)
 	}
+
+	// 3개 카테고리 평균만 가볍게 — 대시보드 티어 계산이 씀(마이페이지는 stat-overview 사용).
+	@GetMapping("/aggregate-stat-categories")
+	fun getMyAggregateStatCategories(authentication: Authentication): List<AggregateStatCategoryResponse> =
+		aggregateStatService.getMyAggregateStatCategories(authentication.name)
 }

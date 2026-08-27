@@ -5,6 +5,8 @@ import com.tradinggym.backend.dto.CreateSessionRequest
 import com.tradinggym.backend.dto.CreateTradeRequest
 import com.tradinggym.backend.dto.PricePoint
 import com.tradinggym.backend.dto.QuoteResponse
+import com.tradinggym.backend.dto.RiskWarningRequest
+import com.tradinggym.backend.dto.RiskWarningResponse
 import com.tradinggym.backend.dto.SessionResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
 import com.tradinggym.backend.dto.StockDisclosureItemResponse
@@ -12,9 +14,11 @@ import com.tradinggym.backend.dto.StockDisclosureResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
+import com.tradinggym.backend.dto.TurnNewsResponse
 import com.tradinggym.backend.entity.SimulationSession
 import com.tradinggym.backend.entity.SimulationSessionStatus
 import com.tradinggym.backend.entity.StockDailyPrice
+import com.tradinggym.backend.entity.StockNews
 import com.tradinggym.backend.entity.Trade
 import com.tradinggym.backend.entity.TradeOrderType
 import com.tradinggym.backend.entity.TradeSide
@@ -29,6 +33,7 @@ import com.tradinggym.backend.repository.StockNewsRepository
 import com.tradinggym.backend.repository.TradeRepository
 import com.tradinggym.backend.repository.TurnLogRepository
 import com.tradinggym.backend.repository.UserJpaRepository
+import com.tradinggym.backend.service.ai.RiskWarningGenerator
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -51,6 +56,7 @@ class SimulationService(
 	private val stockDisclosureRepository: StockDisclosureRepository,
 	private val turnLogRepository: TurnLogRepository,
 	private val sessionSummaryService: SessionSummaryService,
+	private val riskWarningGenerator: RiskWarningGenerator,
 ) {
 
 	@Transactional
@@ -106,7 +112,10 @@ class SimulationService(
 	// 세션 리포트/AI 종합 분석용 — 턴 하나하나가 관망이었는지 매매가 있었는지까지 전부 나옴.
 	fun listTurnLogs(username: String, sessionId: UUID): List<TurnLogResponse> {
 		val session = requireOwnedSession(username, sessionId)
-		return turnLogRepository.findBySessionIdOrderByTurnNumberAsc(requireNotNull(session.id)).map { it.toResponse() }
+		val logs = turnLogRepository.findBySessionIdOrderByTurnNumberAsc(requireNotNull(session.id))
+		return logs.mapIndexed { index, log ->
+			log.toResponse(newsForTurnPeriod(logs, index).map { it.toTurnNewsResponse() })
+		}
 	}
 
 	fun getActiveSession(username: String): SessionResponse? {
@@ -320,6 +329,14 @@ class SimulationService(
 	fun listTrades(username: String, sessionId: UUID): List<TradeResponse> {
 		val session = requireOwnedSession(username, sessionId)
 		return tradeRepository.findBySessionIdOrderBySimulatedTradeDateAsc(requireNotNull(session.id)).map { it.toResponse() }
+	}
+
+	// 신용매수를 진행하기 전, 프론트가 예상 담보비율을 미리 계산해서 넘기면 AI가 그 자리에서
+	// 경고 메시지를 만들어 돌려줌 — 매매는 아직 기록 안 됨(사용자가 "그래도 진행"을 눌러야
+	// 실제 recordTrade가 호출됨). 세션 소유권만 확인하고 그 외엔 DB에 손 안 댐(저장 없음).
+	fun generateRiskWarning(username: String, sessionId: UUID, request: RiskWarningRequest): RiskWarningResponse {
+		requireOwnedSession(username, sessionId)
+		return RiskWarningResponse(riskWarningGenerator.generate(request))
 	}
 
 	// currentTurnDate를 요청받은 turnUnit(하루/일주일/한달)만큼 건너뛴 다음, 그 시점 이후
@@ -612,6 +629,13 @@ class SimulationService(
 		stockDailyPriceRepository.findByStockCodeAndTradeDate(stockCode, tradeDate)
 			?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "${tradeDate}에 ${stockCode} 시세 데이터가 없어요")
 
+	// logs[index]가 열리기까지 건너뛴 기간(직전 턴 날짜 다음날 ~ 이 턴 날짜) 동안 있었던
+	// 뉴스 — 1턴째(index=0)는 건너뛴 구간이 없어서 그날 하루만 봄.
+	private fun newsForTurnPeriod(logs: List<TurnLog>, index: Int): List<StockNews> {
+		val rangeStart = if (index == 0) logs[index].turnDate else logs[index - 1].turnDate.plusDays(1)
+		return stockNewsRepository.findByTradeDateBetweenOrderByTradeDateAsc(rangeStart, logs[index].turnDate)
+	}
+
 	companion object {
 		private val MAINTENANCE_RATIO = BigDecimal("1.4") // 담보 유지비율 140% (RiskInterventionModal mock 수치와 동일)
 		const val MAX_TURNS = 10 // 세션당 최대 턴 수 — 턴 단위(하루/일주일/한달)와 무관하게 동일하게 적용 (회의 결정: 10턴)
@@ -676,7 +700,15 @@ private fun Trade.toResponse() = TradeResponse(
 	createdAt = createdAt,
 )
 
-private fun TurnLog.toResponse() = TurnLogResponse(
+private fun StockNews.toTurnNewsResponse() = TurnNewsResponse(
+	stockCode = stockCode,
+	headline = headline,
+	summary = summary,
+	source = source,
+	tradeDate = tradeDate,
+)
+
+private fun TurnLog.toResponse(news: List<TurnNewsResponse>) = TurnLogResponse(
 	id = requireNotNull(id),
 	turnNumber = turnNumber,
 	turnDate = turnDate,
@@ -684,6 +716,7 @@ private fun TurnLog.toResponse() = TurnLogResponse(
 	cash = cash,
 	borrowedAmount = borrowedAmount,
 	holdingsValue = holdingsValue,
+	news = news,
 	portfolioValue = portfolioValue,
 	tradeCount = tradeCount,
 	action = action,

@@ -20,6 +20,7 @@ data class PersonalizedQuizResponse(
 	val sourceTitle: String?,
 	val sourcePageStart: Int?,
 	val sourcePageEnd: Int?,
+	val sourceSessionId: UUID?,
 	val createdAt: Instant,
 )
 
@@ -47,5 +48,6 @@ data class QuizHistoryItemResponse(
 	val sourceTitle: String?,
 	val sourcePageStart: Int?,
 	val sourcePageEnd: Int?,
+	val sourceSessionId: UUID?,
 	val createdAt: Instant,
 )

@@ -63,12 +63,25 @@ CREATE TABLE IF NOT EXISTS edu_articles (
   page_start INT NOT NULL,
   page_end INT NOT NULL,
   topic_summary TEXT,
+  target_stat_key TEXT CHECK (target_stat_key IN (
+    'JUDGMENT_ACCURACY', 'DISCLOSURE_CHECK_RATE', 'RISK_MANAGEMENT_SCORE', 'IMPULSIVE_TRADING',
+    'LOSS_AVERSION', 'CONFIRMATION_BIAS', 'DIVERSIFICATION', 'GAMBLING_SIGNAL'
+  )),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS edu_articles_document_idx
   ON edu_articles (document_id);
+CREATE INDEX IF NOT EXISTS edu_articles_stat_key_idx
+  ON edu_articles (target_stat_key);
 """
+
+# Kotlin SessionStatKey enum과 동일 — 자료실 글을 /pt 맞춤 퀴즈가 쓰는 8개 약점 지표와
+# 같은 어휘로 태깅해서 필터링 가능하게 함.
+STAT_KEYS = [
+    "JUDGMENT_ACCURACY", "DISCLOSURE_CHECK_RATE", "RISK_MANAGEMENT_SCORE", "IMPULSIVE_TRADING",
+    "LOSS_AVERSION", "CONFIRMATION_BIAS", "DIVERSIFICATION", "GAMBLING_SIGNAL",
+]
 
 
 def connect(url: str) -> psycopg.Connection:
@@ -262,13 +275,27 @@ def insert_article(
     page_start: int,
     page_end: int,
     topic_summary: str,
+    target_stat_key: Optional[str] = None,
 ) -> int:
     row = conn.execute(
         """
-        INSERT INTO edu_articles (document_id, title, body, page_start, page_end, topic_summary)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO edu_articles (document_id, title, body, page_start, page_end, topic_summary, target_stat_key)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (document_id, title, body, page_start, page_end, topic_summary),
+        (document_id, title, body, page_start, page_end, topic_summary, target_stat_key),
     ).fetchone()
     return int(row[0])
+
+
+def get_articles_missing_stat_key(conn: psycopg.Connection, document_id: int) -> List[Dict[str, Any]]:
+    """target_stat_key 태깅 이전에 만들어진 글들 — 백필용."""
+    rows = conn.execute(
+        "SELECT id, title, topic_summary FROM edu_articles WHERE document_id = %s AND target_stat_key IS NULL ORDER BY id",
+        (document_id,),
+    ).fetchall()
+    return [{"id": r[0], "title": r[1], "topic_summary": r[2]} for r in rows]
+
+
+def set_article_stat_key(conn: psycopg.Connection, article_id: int, stat_key: str) -> None:
+    conn.execute("UPDATE edu_articles SET target_stat_key = %s WHERE id = %s", (stat_key, article_id))

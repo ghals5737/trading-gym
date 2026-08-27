@@ -1,5 +1,6 @@
 package com.tradinggym.backend.service
 
+import com.tradinggym.backend.dto.AggregateStatCategoryResponse
 import com.tradinggym.backend.dto.AggregateStatResponse
 import com.tradinggym.backend.dto.StatCategoryScoreResponse
 import com.tradinggym.backend.dto.StatOverviewResponse
@@ -51,6 +52,24 @@ class AggregateStatService(
 				sessionCount = list.count { !it.fromQuiz },
 				quizCount = list.count { it.fromQuiz },
 				latestNote = list.last().note,
+			)
+		}
+	}
+
+	// 8개 세부 지표(퀴즈 반영 평균)를 3개 카테고리로 묶은 평균 — 대시보드 티어 등이 씀.
+	// session_stat_categories(세션 종료 시점 스냅샷)를 직접 읽지 않고 매번 다시 계산하는
+	// 이유(ksj): 퀴즈를 새로 맞힐 때마다 카테고리 점수도 같이 움직이게 하려는 것.
+	// 매핑은 SessionStatCategoryMapper 한 곳(hhm 규칙 — 도박성은 침착성에만).
+	fun getMyAggregateStatCategories(username: String): List<AggregateStatCategoryResponse> {
+		val keyScores = getMyAggregateStats(username).associate { it.statKey to it.avgScorePct }
+		val categoryScores = SessionStatCategoryMapper.computeCategoryScores(keyScores)
+		val sessionCountByKey = sessionStatRepository.findBySession_User_UsernameOrderByComputedAtAsc(username)
+			.groupingBy { it.statKey }.eachCount()
+		return SessionStatCategoryMapper.KEYS_BY_CATEGORY.map { (category, keys) ->
+			AggregateStatCategoryResponse(
+				categoryKey = category,
+				avgScorePct = categoryScores.getValue(category),
+				sessionCount = keys.maxOfOrNull { sessionCountByKey[it] ?: 0 } ?: 0,
 			)
 		}
 	}

@@ -16,6 +16,7 @@ export interface PersonalizedQuizResponse {
   sourceTitle: string | null;
   sourcePageStart: number | null;
   sourcePageEnd: number | null;
+  sourceSessionId: string | null;
   createdAt: string;
 }
 
@@ -41,6 +42,7 @@ export interface QuizHistoryItemResponse {
   sourceTitle: string | null;
   sourcePageStart: number | null;
   sourcePageEnd: number | null;
+  sourceSessionId: string | null;
   createdAt: string;
 }
 
@@ -48,6 +50,12 @@ export interface QuizHistoryItemResponse {
 // (매번 새 문제 — 이전 문제를 덮어쓰지 않고 계속 쌓임).
 export function generateQuiz(): Promise<PersonalizedQuizResponse> {
   return authFetch<PersonalizedQuizResponse>('/api/quiz/generate', { method: 'POST' });
+}
+
+// generateQuiz와 달리 유저 전체 평균이 아니라 세션 하나의 스탯만 보고 약점을 골라 문제를
+// 만듦 — 모의투자가 막 끝난 직후(세션 종료 화면)에서 그 세션 결과로만 문제를 내줄 때 씀.
+export function generateQuizForSession(sessionId: string): Promise<PersonalizedQuizResponse> {
+  return authFetch<PersonalizedQuizResponse>(`/api/quiz/generate-for-session/${sessionId}`, { method: 'POST' });
 }
 
 // 가장 최근에 만들어둔 문제 — 없으면 null(204).

@@ -65,9 +65,12 @@ button {
 }
 /* 로그인 전에도 로봇(#stage/#bot-hitbox/#bot-bubble)은 보이고 돌아다녀야
    knowerbotRequireLogin()의 "로그인이 필요해요" 접근+말풍선이 실제로 보임.
-   실제 대화 기능(채팅창)만 로그인 후로 gate. */
-body:not(.logged-in) #chat-panel,
-body:not(.logged-in) #bot-close {
+   실제 대화 기능(채팅창)만 로그인 후로 gate — #bot-close(닫기 버튼)는 로그인 여부와
+   무관하게 항상 쓸 수 있어야 함(안 그러면 "로그인이 필요해요" 상태를 닫을 방법이
+   없어짐). 기본 상태는 opacity:0/pointer-events:none이라 .active 없인 어차피
+   안 보이고 안 눌림(#bot-close 정의 참고) — 그래서 여기서 굳이 또 숨길 필요가 없음.
+   */
+body:not(.logged-in) #chat-panel {
   visibility: hidden;
 }
 /* login modal: hidden until explicitly opened via a "로그인" button, and
@@ -774,6 +777,227 @@ h1 {
   cursor: pointer;
 }
 
+/* ---------- library (자료실) ---------- */
+.lib-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+.lib-doc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 168px;
+  padding: 24px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+}
+.lib-doc-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--green) 30%, var(--line));
+  box-shadow: 0 18px 34px rgba(32, 38, 28, 0.1);
+}
+.lib-doc-card.is-empty {
+  opacity: 0.6;
+}
+.lib-doc-card.is-empty:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--line);
+}
+.lib-doc-org {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--soft);
+  background: var(--chip);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.lib-doc-title {
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.4;
+  margin: 0;
+  text-wrap: balance;
+}
+.lib-doc-stat {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green);
+}
+.lib-doc-stat.is-empty {
+  color: var(--muted);
+}
+
+.lib-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lib-filter-chip {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.lib-filter-chip:hover {
+  border-color: color-mix(in srgb, var(--green) 30%, var(--line));
+}
+.lib-filter-chip.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.lib-filter-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.lib-filter-chip:disabled:hover {
+  border-color: var(--line);
+}
+
+.lib-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+.lib-pagination-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lib-pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.lib-pagination-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.lib-article-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lib-article-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.lib-article-card:hover {
+  transform: translateX(2px);
+  border-color: color-mix(in srgb, var(--green) 30%, var(--line));
+  box-shadow: 0 10px 24px rgba(32, 38, 28, 0.08);
+}
+.lib-article-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 5px;
+}
+.lib-article-summary {
+  font-size: 13px;
+  color: var(--soft);
+  line-height: 1.55;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lib-article-page {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--chip);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.lib-article-body {
+  font-size: 16px;
+  line-height: 1.95;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.lib-citation {
+  margin-top: 32px;
+  padding: 16px 18px;
+  background: var(--chip);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--soft);
+  font-weight: 600;
+}
+.lib-article-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+.lib-article-nav-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-width: 0;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.lib-article-nav-link:hover {
+  border-color: color-mix(in srgb, var(--green) 30%, var(--line));
+  box-shadow: 0 10px 24px rgba(32, 38, 28, 0.08);
+}
+.lib-article-nav-link.next {
+  text-align: right;
+  align-items: flex-end;
+}
+.lib-article-nav-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.lib-article-nav-title {
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 @media (max-width: 720px) {
   .card-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -787,6 +1011,9 @@ h1 {
   #chat-panel {
     bottom: 12px;
     width: min(560px, calc(100vw - 24px));
+  }
+  .lib-article-nav {
+    grid-template-columns: 1fr;
   }
 }
 

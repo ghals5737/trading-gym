@@ -2,6 +2,7 @@ package com.tradinggym.backend.dto
 
 import com.tradinggym.backend.entity.AgeBand
 import com.tradinggym.backend.entity.InvestorProfileType
+import com.tradinggym.backend.entity.SessionStatCategory
 import com.tradinggym.backend.entity.SessionStatKey
 
 data class ProductTourStatusResponse(
@@ -52,4 +53,12 @@ data class PeerComparisonResponse(
 	val peerAvgRiskScore: Double,
 	val peerCount: Int, // 나를 뺀 같은 나이대 진단 완료자 수
 	val comparisonText: String, // "내 또래에 비해 공격성이 높아요" 류의 한 문장
+)
+
+// session_stat_categories를 유저 단위로 묶어 카테고리별로 평균 낸 값 — AggregateStatResponse의
+// 3개 성향 카테고리 버전.
+data class AggregateStatCategoryResponse(
+	val categoryKey: SessionStatCategory,
+	val avgScorePct: Int,
+	val sessionCount: Int,
 )

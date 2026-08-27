@@ -225,9 +225,9 @@ export const report = {
   summary:
     '오르는 주식을 따라 사는 편이에요. 판단의 71%가 이미 오른 종목 따라사기였고, 공시를 열어본 판단은 10번 중 4번이 안 됐어요. 승급까지 공시 확인율 50%가 필요해요.',
   metrics: [
-    { label: '판단 정확도', value: '62%' },
-    { label: '공시 확인율', value: '38%' },
-    { label: '리스크 관리', value: '54점' },
+    { label: '정확성', value: '48점' },
+    { label: '침착성', value: '41점' },
+    { label: '공격성', value: '67점' },
   ],
   growth: [
     { label: '판단 정확도', before: '48%', after: '62%' },

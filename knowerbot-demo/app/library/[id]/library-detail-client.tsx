@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '../../../components/TopNav';
 import LoginButton from '../../../components/LoginButton';
-import { getLibraryDocument, type LibraryDocumentDetailResponse } from '../../../lib/library-api';
+import {
+  getLibraryArticleStatCounts,
+  getLibraryArticles,
+  getLibraryDocuments,
+  type LibraryArticleListResponse,
+  type LibraryDocumentResponse,
+} from '../../../lib/library-api';
+import { SESSION_STAT_LABELS, type SessionStatKey } from '../../../lib/user-api';
 
 declare global {
   interface Window {
@@ -25,16 +32,16 @@ function notifyKnowerbotLoginRequired() {
   tryNotify();
 }
 
-// edu_pages는 실제 PDF 쪽 단위라 오버랩이 없음 — 책 한 권이 500쪽 넘는 것도 있어서
-// 한 번에 안 불러오고 이 쪽수만큼씩 넘겨봄.
-const PAGES_PER_SCREEN = 5;
+const PAGE_SIZE = 20;
 
 export default function LibraryDetailClient({ documentId }: { documentId: number }) {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [checkedLogin, setCheckedLogin] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [detail, setDetail] = useState<LibraryDocumentDetailResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [document, setDocument] = useState<LibraryDocumentResponse | null>(null);
+  const [statCounts, setStatCounts] = useState<Partial<Record<SessionStatKey, number>>>({});
+  const [selectedStat, setSelectedStat] = useState<SessionStatKey | null>(null);
+  const [page, setPage] = useState(0);
+  const [list, setList] = useState<LibraryArticleListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,15 +58,23 @@ export default function LibraryDetailClient({ documentId }: { documentId: number
     setCheckedLogin(true);
   }, []);
 
+  // 문서 메타·지표별 개수는 필터 바뀔 때마다 다시 부를 필요 없어서 한 번만 불러옴.
   useEffect(() => {
     if (!checkedLogin || needsLogin) return;
-    setLoading(true);
-    setError(null);
-    getLibraryDocument(documentId, offset, PAGES_PER_SCREEN)
-      .then(setDetail)
-      .catch((e) => setError(e instanceof Error ? e.message : '자료를 불러오지 못했어요'))
-      .finally(() => setLoading(false));
-  }, [checkedLogin, needsLogin, documentId, offset]);
+    Promise.all([getLibraryDocuments(), getLibraryArticleStatCounts(documentId)])
+      .then(([docs, counts]) => {
+        setDocument(docs.find((d) => d.id === documentId) ?? null);
+        setStatCounts(counts);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : '자료를 불러오지 못했어요'));
+  }, [checkedLogin, needsLogin, documentId]);
+
+  useEffect(() => {
+    if (!checkedLogin || needsLogin) return;
+    getLibraryArticles(documentId, { statKey: selectedStat ?? undefined, offset: page * PAGE_SIZE, limit: PAGE_SIZE })
+      .then(setList)
+      .catch((e) => setError(e instanceof Error ? e.message : '글 목록을 불러오지 못했어요'));
+  }, [checkedLogin, needsLogin, documentId, selectedStat, page]);
 
   if (!checkedLogin) {
     return null;
@@ -75,7 +90,7 @@ export default function LibraryDetailClient({ documentId }: { documentId: number
               <span className="badge">짐</span>
               로그인이 필요해요
             </div>
-            <h1>로그인하고 자료 원문을 읽어보세요</h1>
+            <h1>로그인하고 이 자료의 글을 읽어보세요</h1>
             <div className="cta-row">
               <LoginButton className="btn btn-primary">로그인</LoginButton>
             </div>
@@ -85,94 +100,121 @@ export default function LibraryDetailClient({ documentId }: { documentId: number
     );
   }
 
-  const hasPrev = offset > 0;
-  const hasNext = detail ? offset + detail.pages.length < detail.totalPages : false;
+  const totalCount = document?.articleCount ?? 0;
+  const totalPages = list ? Math.max(1, Math.ceil(list.total / PAGE_SIZE)) : 1;
+  const statKeys = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
+
+  function selectStat(key: SessionStatKey | null) {
+    setSelectedStat(key);
+    setPage(0);
+  }
 
   return (
     <div>
       <TopNav right="자료실" />
-      <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px 32px 100px' }}>
-        <Link href="/library" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>
+      <div className="page-narrow">
+        <Link href="/library" style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>
           ← 자료 목록으로
         </Link>
 
-        {loading && !detail && <p style={{ marginTop: 24, fontSize: 13, color: 'var(--muted)' }}>불러오는 중...</p>}
-        {error && <p style={{ marginTop: 24, fontSize: 13, color: 'var(--red)' }}>{error}</p>}
+        {error && <p style={{ fontSize: 13, color: 'var(--red)' }}>{error}</p>}
 
-        {detail && (
-          <>
-            <div style={{ marginTop: 16, marginBottom: 8 }}>
-              {detail.document.orgName && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--soft)',
-                    background: 'var(--chip)',
-                    borderRadius: 999,
-                    padding: '3px 9px',
-                  }}
-                >
-                  {detail.document.orgName}
-                  {detail.document.year ? ` · ${detail.document.year}` : ''}
-                </span>
-              )}
-              <h1 style={{ fontSize: 22, margin: '10px 0 0' }}>{detail.document.title}</h1>
-            </div>
+        {document && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {document.orgName && (
+              <span className="lib-doc-org" style={{ alignSelf: 'flex-start' }}>
+                {document.orgName}
+                {document.year ? ` · ${document.year}` : ''}
+              </span>
+            )}
+            <h1 style={{ fontSize: 30 }}>{document.title}</h1>
+            {totalCount > 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>주제별 글 {totalCount}개</p>}
+          </div>
+        )}
 
-            <div
-              style={{
-                background: 'var(--white)',
-                border: '1px solid var(--line)',
-                borderRadius: 16,
-                padding: '28px 32px',
-                marginTop: 20,
-                opacity: loading ? 0.5 : 1,
-                transition: 'opacity 0.15s',
-              }}
+        {totalCount > 0 && (
+          <div className="lib-filter-row">
+            <button
+              className={`lib-filter-chip${selectedStat === null ? ' active' : ''}`}
+              onClick={() => selectStat(null)}
             >
-              {detail.pages.map((page) => (
-                <div key={page.pageNumber} style={{ marginBottom: 22 }}>
-                  <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
-                    {page.pageNumber}쪽
-                  </p>
-                  <p
+              전체 {totalCount}
+            </button>
+            {statKeys.map((key) => {
+              const count = statCounts[key] ?? 0;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={key}
+                  className={`lib-filter-chip${selectedStat === key ? ' active' : ''}`}
+                  onClick={() => selectStat(key)}
+                >
+                  {SESSION_STAT_LABELS[key].label} {count}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {!error && !list && <p style={{ fontSize: 13, color: 'var(--muted)' }}>불러오는 중...</p>}
+        {list && list.articles.length === 0 && (
+          <p style={{ fontSize: 13, color: 'var(--muted)' }}>
+            {totalCount === 0 ? '아직 정리된 글이 없어요. 곧 준비할게요.' : '이 지표에 해당하는 글이 아직 없어요.'}
+          </p>
+        )}
+
+        <div className="lib-article-list">
+          {list?.articles.map((article) => (
+            <Link key={article.id} href={`/library/${documentId}/articles/${article.id}`} className="lib-article-card">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {article.targetStatKey && (
+                  <span
                     style={{
-                      margin: 0,
-                      fontSize: 14,
-                      lineHeight: 1.8,
-                      color: 'var(--ink)',
-                      whiteSpace: 'pre-wrap',
+                      display: 'inline-block',
+                      marginBottom: 6,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: 'var(--green)',
+                      background: 'var(--green-chip)',
+                      borderRadius: 999,
+                      padding: '2px 8px',
                     }}
                   >
-                    {page.content}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16 }}>
-              <button
-                className="btn btn-secondary"
-                disabled={!hasPrev || loading}
-                onClick={() => setOffset((o) => Math.max(0, o - PAGES_PER_SCREEN))}
-                style={{ opacity: !hasPrev || loading ? 0.4 : 1 }}
-              >
-                ← 이전
-              </button>
-              <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>
-                {Math.floor(offset / PAGES_PER_SCREEN) + 1} / {Math.max(1, Math.ceil(detail.totalPages / PAGES_PER_SCREEN))}
+                    {SESSION_STAT_LABELS[article.targetStatKey].label}
+                  </span>
+                )}
+                <p className="lib-article-title">{article.title}</p>
+                {article.topicSummary && <p className="lib-article-summary">{article.topicSummary}</p>}
+              </div>
+              <span className="lib-article-page">
+                {article.pageStart === article.pageEnd
+                  ? `${article.pageStart}쪽`
+                  : `${article.pageStart}~${article.pageEnd}쪽`}
               </span>
-              <button
-                className="btn btn-secondary"
-                disabled={!hasNext || loading}
-                onClick={() => setOffset((o) => o + PAGES_PER_SCREEN)}
-                style={{ opacity: !hasNext || loading ? 0.4 : 1 }}
-              >
-                다음 →
-              </button>
-            </div>
-          </>
+            </Link>
+          ))}
+        </div>
+
+        {list && list.total > PAGE_SIZE && (
+          <div className="lib-pagination">
+            <button
+              className="lib-pagination-btn"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ← 이전
+            </button>
+            <span className="lib-pagination-status">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              className="lib-pagination-btn"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              다음 →
+            </button>
+          </div>
         )}
       </div>
     </div>
