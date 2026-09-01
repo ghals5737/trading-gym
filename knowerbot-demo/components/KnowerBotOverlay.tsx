@@ -32,9 +32,19 @@ export default function KnowerBotOverlay() {
         ✕
       </button>
       <section id="chat-panel" aria-label="KnowerBot 채팅">
+        {/* 닫기 버튼이 채팅창 안에 있다는 게 핵심 —
+            기존 #bot-close는 3D 로봇 머리 위를 따라다녀서(runtime의 updateClosePosition)
+            채팅창은 화면 아래 가운데, 닫기 버튼은 로봇이 서 있는 아무 데나에 있었다.
+            "닫는 창이 너무 멀리 있다"는 피드백이 이것. 로봇을 따라다니는 버튼은 그대로 두고,
+            채팅창 자체에도 항상 같은 자리에 있는 닫기를 추가한다. */}
         <div className="chat-head" id="chat-toggle">
           <span>KnowerBot 대화</span>
-          <span>온라인</span>
+          <span className="chat-head-right">
+            <span className="chat-online">온라인</span>
+            <button type="button" id="chat-close" aria-label="대화 닫기" title="대화 닫기">
+              ✕
+            </button>
+          </span>
         </div>
         <div className="chat-log" id="chat-log">
           <div className="chat-msg bot">필요하면 저를 눌러서 불러주세요.</div>

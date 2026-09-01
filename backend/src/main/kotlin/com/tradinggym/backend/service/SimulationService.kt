@@ -11,6 +11,7 @@ import com.tradinggym.backend.dto.SessionResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
 import com.tradinggym.backend.dto.StockDisclosureItemResponse
 import com.tradinggym.backend.dto.StockDisclosureResponse
+import com.tradinggym.backend.dto.StockNewsItemResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
@@ -201,17 +202,22 @@ class SimulationService(
 
 	// 그 종목의 실제 뉴스(고정 데이터) 중 세션 현재 거래일 이전이거나 같은 날짜의 가장
 	// 최근 것 하나 — 뉴스가 있는 날짜는 드물어서(가격이 크게 움직인 날 위주) "오늘"만
-	// 정확히 맞추면 거의 항상 없음. 대신 NEWS_LOOKBACK_DAYS 이내로만 보여줘서, 몇 달 전
-	// 뉴스가 "최신 뉴스"인 것처럼 계속 남아있지 않게 함.
-	fun getStockNews(username: String, sessionId: UUID, stockCode: String): StockNewsResponse? {
+	// 그 종목의 뉴스(고정 데이터) — 세션 현재 거래일까지 나온 것 중 최신 3건.
+	// 며칠 전 뉴스인지는 daysAgo로 같이 내려보내고, 보여줄지 말지는 화면이 정한다.
+	fun getStockNews(username: String, sessionId: UUID, stockCode: String): StockNewsResponse {
 		val session = requireOwnedSession(username, sessionId)
-		val latest = stockNewsRepository.findTop1ByStockCodeAndTradeDateLessThanEqualOrderByTradeDateDesc(
-			stockCode,
-			session.currentTurnDate,
-		) ?: return null
-		val daysSince = ChronoUnit.DAYS.between(latest.tradeDate, session.currentTurnDate)
-		if (daysSince > NEWS_LOOKBACK_DAYS) return null
-		return StockNewsResponse(headline = latest.headline, summary = latest.summary, source = latest.source, tradeDate = latest.tradeDate)
+		val items = stockNewsRepository
+			.findTop3ByStockCodeAndTradeDateLessThanEqualOrderByTradeDateDesc(stockCode, session.currentTurnDate)
+			.map {
+				StockNewsItemResponse(
+					headline = it.headline,
+					summary = it.summary,
+					source = it.source,
+					tradeDate = it.tradeDate,
+					daysAgo = ChronoUnit.DAYS.between(it.tradeDate, session.currentTurnDate),
+				)
+			}
+		return StockNewsResponse(stockCode = stockCode, items = items)
 	}
 
 	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 것 중 최신 3건.
@@ -654,8 +660,6 @@ class SimulationService(
 		private val START_DATE_EDGE_BUFFER: Period = Period.ofMonths(1)
 
 		// 종목 뉴스(고정 데이터)가 "최신 뉴스"로 보일 수 있는 최대 기간(달력일) — 이보다
-		// 오래된 뉴스는 getStockNews가 null로 처리해서 화면에서 사라짐.
-		private const val NEWS_LOOKBACK_DAYS = 14
 	}
 }
 

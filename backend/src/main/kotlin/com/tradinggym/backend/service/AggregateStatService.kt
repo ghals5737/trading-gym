@@ -90,6 +90,8 @@ class AggregateStatService(
 				scorePct = (if (def.reversed) 100.0 - raw else raw).roundToInt(),
 				description = def.description,
 				higherIsBetter = def.higherIsBetter,
+				memberKeys = def.memberKeys,
+				reversed = def.reversed,
 			)
 		}
 

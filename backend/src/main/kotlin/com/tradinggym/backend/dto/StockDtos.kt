@@ -29,12 +29,20 @@ data class StockHistoryResponse(
 )
 
 // 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터(StockNews) 기반 — 뉴스가 있는 날짜는
-// 드물어서, "오늘" 것만이 아니라 최근 며칠 이내 가장 최근 것을 보여줌(SimulationService 참고).
-data class StockNewsResponse(
+// 드물어서 "오늘" 것만 보여주면 거의 항상 비어 있다. 그래서 공시와 같이 "현재 거래일까지
+// 나온 것 중 최신 몇 건"을 내려주고, 며칠 전 뉴스인지(daysAgo)를 같이 줘서 화면이
+// 오래된 뉴스를 방금 나온 것처럼 보이지 않게 한다.
+data class StockNewsItemResponse(
 	val headline: String,
 	val summary: String,
 	val source: String,
 	val tradeDate: LocalDate,
+	val daysAgo: Long, // 세션 현재 거래일 기준 며칠 전 뉴스인지
+)
+
+data class StockNewsResponse(
+	val stockCode: String,
+	val items: List<StockNewsItemResponse>,
 )
 
 // DART 공시 요약(고정 데이터, StockDisclosure) — 세션 현재 거래일까지 나온 공시 중 최신

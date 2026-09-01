@@ -648,24 +648,27 @@ h1 {
   outline: 2px solid var(--green);
   outline-offset: 3px;
 }
+/* 로봇 머리 위를 따라다니는 닫기 — 위치가 계속 바뀌는 만큼 눈에는 확실히 띄어야 해서
+   반투명 흰 원(대비 낮음)에서 진한 원 + 그림자로 바꾸고 크기도 키웠다.
+   위치가 고정된 닫기는 채팅창 헤더의 #chat-close 쪽. */
 #bot-close {
   position: fixed;
   z-index: 9;
-  width: 30px;
-  height: 30px;
-  margin-left: -15px;
-  margin-top: -15px;
-  border: 1px solid rgba(35, 35, 29, 0.1);
+  width: 38px;
+  height: 38px;
+  margin-left: -19px;
+  margin-top: -19px;
+  border: 2px solid var(--white);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
-  color: var(--ink);
-  font-size: 13px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 15px;
   font-weight: 800;
   line-height: 1;
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(28, 32, 24, 0.16);
+  box-shadow: 0 10px 24px rgba(28, 32, 24, 0.32);
   opacity: 0;
   pointer-events: none;
   transform: scale(0.8);
@@ -718,9 +721,39 @@ h1 {
   font-weight: 800;
   cursor: default;
 }
-.chat-head span:last-child {
+.chat-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.chat-online {
   color: var(--green);
   font-size: 11px;
+}
+/* 채팅창 안의 닫기 — 로봇을 따라다니는 #bot-close와 달리 위치가 고정이라 항상 여기 있다.
+   대비를 확실히 줘서(테두리 + 진한 글자) 잘 안 보인다는 피드백을 같이 해결. */
+#chat-close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+#chat-close:hover {
+  background: var(--red-chip);
+  color: var(--red);
+}
+#chat-close:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
 }
 .chat-log {
   display: flex;

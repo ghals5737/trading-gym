@@ -83,18 +83,16 @@ class SimulationController(
 		@PathVariable stockCode: String,
 	): StockHistoryResponse = simulationService.getStockHistory(authentication.name, sessionId, stockCode)
 
-	// 그 종목의 최근 실제 뉴스(고정 데이터) — 없으면(뉴스가 있는 날짜가 아니거나 너무
-	// 오래됐으면) 204로 응답, 프론트는 뉴스 카드를 안 보여주면 됨.
+	// 그 종목의 최근 실제 뉴스(고정 데이터) — 공시와 같이 뉴스가 하나도 없어도 200 + 빈 목록.
+	// 예전엔 204를 돌려주면 프론트가 뉴스 섹터를 통째로 숨겼는데, 시드 뉴스가 드물어서
+	// 사실상 항상 숨겨져 있었다(= "뉴스 섹터가 빠졌다"). 이제 섹터는 항상 있고 비어 있으면
+	// 비었다고 말한다.
 	@GetMapping("/{sessionId}/stocks/{stockCode}/news")
 	fun getStockNews(
 		authentication: Authentication,
 		@PathVariable sessionId: UUID,
 		@PathVariable stockCode: String,
-	): ResponseEntity<StockNewsResponse> {
-		val news = simulationService.getStockNews(authentication.name, sessionId, stockCode)
-			?: return ResponseEntity.noContent().build()
-		return ResponseEntity.ok(news)
-	}
+	): StockNewsResponse = simulationService.getStockNews(authentication.name, sessionId, stockCode)
 
 	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 최신 3건.
 	// 공시가 하나도 없어도 200 + 빈 목록(패널 자체는 항상 열 수 있게).

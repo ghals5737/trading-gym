@@ -41,6 +41,12 @@ export interface StatCategoryScoreResponse {
   scorePct: number;
   description: string;
   higherIsBetter: boolean; // false(공격성)면 좋고 나쁨이 아니라 "성향" — 중립 색으로 그림
+  // 이 카테고리를 구성하는 세부 지표 키 — 리포트에서 "3개 성향 = 8개 지표"를 화면으로
+  // 보여주는 데 쓴다. 온보딩 설문 기반 초기 스탯은 8개 지표가 아니라서 빈 배열.
+  memberKeys: SessionStatKey[];
+  // 공격성처럼 (100 - 지표점수)로 뒤집어 평균 낸 카테고리인지 — 세부 지표 점수가 높을수록
+  // 카테고리 점수가 낮아지므로 화면에서 그 방향을 설명해줘야 한다.
+  reversed: boolean;
 }
 
 export interface StatOverviewResponse {

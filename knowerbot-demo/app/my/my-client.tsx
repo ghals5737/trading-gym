@@ -21,6 +21,7 @@ import {
   type PeerComparisonResponse,
 } from '../../lib/user-api';
 import { getSessionHistory, type SessionHistoryItemResponse } from '../../lib/simulation-api';
+import { getQuizHistory, type QuizHistoryItemResponse } from '../../lib/quiz-api';
 
 declare global {
   interface Window {
@@ -446,6 +447,12 @@ const STAT_KEYS = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
 function StatsTab() {
   const [overview, setOverview] = useState<StatOverviewResponse | null>(null);
   const [history, setHistory] = useState<SessionHistoryItemResponse[]>([]);
+  // 모의고사 기록 옆에 그 세션에서 나온 퀴즈를 같이 붙이려고 함께 불러옴 —
+  // 퀴즈는 sourceSessionId로 어느 세션에서 나왔는지 알 수 있다.
+  const [quizzes, setQuizzes] = useState<QuizHistoryItemResponse[]>([]);
+  // 펼쳐 본 모의고사 기록(sessionId) — 점수만 보고는 왜 그 점수인지 알 수 없어서,
+  // 펼치면 지표별 채점 근거와 그 세션에서 나온 퀴즈를 같이 보여준다.
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -457,6 +464,8 @@ function StatsTab() {
       .finally(() => setLoading(false));
     // 모의고사 기록(세션별) — 실패해도 평균 스탯은 그대로 보여줌.
     getSessionHistory().then(setHistory).catch(() => setHistory([]));
+    // 퀴즈 기록 — 모의고사 기록을 펼쳤을 때 그 세션에서 나온 문제를 같이 보여주는 용도.
+    getQuizHistory().then(setQuizzes).catch(() => setQuizzes([]));
   }, []);
 
   const stats = overview?.stats ?? null;
@@ -533,26 +542,64 @@ function StatsTab() {
           <StatTriangleChart points={chartPoints} />
         </div>
       )}
-      <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {STAT_KEYS.map((key) => {
-          const { label, suffix, desc } = SESSION_STAT_LABELS[key];
-          const stat = stats.find((s) => s.statKey === key);
+      {/* 8개 세부 지표를 "그냥 8칸"이 아니라 3개 성향 밑에 묶어서 보여준다 —
+          위 카드의 정확성/침착성/공격성 점수가 어디서 나온 건지 화면으로 드러나게.
+          묶는 기준(memberKeys)은 서버가 같이 내려준다(StatCategoryCatalog와 한 소스). */}
+      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--soft)', lineHeight: 1.6 }}>
+          위 <b>3개 성향</b>은 아래 <b>8개 지표</b>를 묶어 평균 낸 값이에요. 어떤 지표가 어느 성향에 들어가는지 아래에서 볼 수 있어요.
+        </p>
+        {(overview?.categories ?? []).map((cat) => {
+          const tone = cat.higherIsBetter
+            ? cat.scorePct >= 70
+              ? 'var(--green)'
+              : cat.scorePct < 40
+              ? 'var(--red)'
+              : 'var(--amber)'
+            : 'var(--soft)';
           return (
-            <div className="result-card" key={key}>
-              <span className="result-tag">{label}</span>
-              <h3>{stat ? `${stat.avgScorePct}${suffix}` : '-'}</h3>
-              <p>{desc}</p>
-              {stat && (
-                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)' }}>
-                  모의고사 {stat.sessionCount}회{stat.quizCount > 0 ? ` · 퀴즈 ${stat.quizCount}개` : ''} 기준
-                </p>
-              )}
-              {stat?.latestNote && (
-                // AI가 채점하며 남긴 판단근거 — 점수만으로는 왜 이 점수인지 알 수 없어서 근거를 같이 보여줌.
-                <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-                  근거: {stat.latestNote}
-                </p>
-              )}
+            <div key={cat.category} style={{ width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                <strong style={{ fontSize: 14 }}>{cat.label}</strong>
+                <span style={{ fontSize: 14, fontWeight: 800, color: tone }}>{cat.scorePct}점</span>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                  아래 {cat.memberKeys.length}개 지표의 평균
+                  {/* 공격성은 지표 점수를 뒤집어 평균 냄 — 안 밝히면 "안전 점수가 높은데 왜
+                      공격성도 높지?"로 읽혀 숫자가 서로 안 맞아 보인다. */}
+                  {cat.reversed ? ' · 지표 점수를 뒤집어 계산해요 (지표가 낮을수록 공격적)' : ''}
+                </span>
+              </div>
+              <div
+                className="result-grid"
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  gridTemplateColumns: `repeat(${Math.min(3, Math.max(1, cat.memberKeys.length))}, minmax(0, 1fr))`,
+                }}
+              >
+                {cat.memberKeys.map((key) => {
+                  const meta = SESSION_STAT_LABELS[key];
+                  const stat = stats.find((st) => st.statKey === key);
+                  return (
+                    <div className="result-card" key={key}>
+                      <span className="result-tag">{meta?.label ?? key}</span>
+                      <h3>{stat ? `${stat.avgScorePct}${meta?.suffix ?? ''}` : '-'}</h3>
+                      <p>{meta?.desc}</p>
+                      {stat && (
+                        <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)' }}>
+                          모의고사 {stat.sessionCount}회{stat.quizCount > 0 ? ` · 퀴즈 ${stat.quizCount}개` : ''} 기준
+                        </p>
+                      )}
+                      {stat?.latestNote && (
+                        // AI가 채점하며 남긴 판단근거 — 점수만으로는 왜 이 점수인지 알 수 없어서 근거를 같이 보여줌.
+                        <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+                          근거: {stat.latestNote}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
@@ -563,43 +610,163 @@ function StatsTab() {
           <h3 style={{ fontSize: 15, margin: '18px 0 0' }}>모의고사 기록</h3>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
             모의고사 한 회가 끝날 때마다 AI가 매매 기록과 판단 메모 전체를 읽고 채점한 결과예요.
+            한 회를 누르면 <b>왜 그 점수를 줬는지</b>와 그 회차에서 나온 문제를 같이 볼 수 있어요.
           </p>
           {history.map((h) => {
             const isGain = h.returnPct >= 0;
+            const expanded = expandedSessionId === h.sessionId;
+            // 이 세션 결과만 보고 만든 문제들 — 세션 종료 화면에서 풀었던 그 문제다.
+            const sessionQuizzes = quizzes.filter((q) => q.sourceSessionId === h.sessionId);
             return (
-              <div key={h.sessionId} className="result-card" style={{ width: '100%', textAlign: 'left', padding: 18 }}>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <strong style={{ fontSize: 14 }}>
-                    {h.startTurnDate} ~ {h.lastTurnDate}
-                  </strong>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.turnCount}턴 진행</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: isGain ? 'var(--red)' : 'var(--green)' }}>
-                    {isGain ? '+' : ''}
-                    {Number(h.returnPct).toFixed(1)}%
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {Math.round(h.startingCash).toLocaleString()}원 → {Math.round(h.finalPortfolioValue).toLocaleString()}원
-                  </span>
-                </div>
-                {h.stats.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                    {h.stats.map((stat) => (
-                      <span
-                        key={stat.statKey}
-                        title={stat.note}
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: '4px 9px',
-                          borderRadius: 999,
-                          background:
-                            stat.scorePct >= 70 ? 'var(--green-chip)' : stat.scorePct < 40 ? 'var(--red-chip)' : 'var(--chip)',
-                          color: stat.scorePct >= 70 ? 'var(--green)' : stat.scorePct < 40 ? 'var(--red)' : 'var(--soft)',
-                        }}
-                      >
-                        {SESSION_STAT_LABELS[stat.statKey]?.label ?? stat.statKey} {stat.scorePct}
-                      </span>
-                    ))}
+              <div key={h.sessionId} className="result-card" style={{ width: '100%', textAlign: 'left', padding: 0 }}>
+                {/* 카드 전체가 토글 버튼 — 점수 칩만 보이는 접힌 상태가 기본이고,
+                    누르면 채점 근거와 퀴즈가 펼쳐진다. */}
+                <button
+                  type="button"
+                  onClick={() => setExpandedSessionId(expanded ? null : h.sessionId)}
+                  aria-expanded={expanded}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: 18,
+                    border: 0,
+                    background: 'transparent',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 14 }}>
+                      {h.startTurnDate} ~ {h.lastTurnDate}
+                    </strong>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.turnCount}턴 진행</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: isGain ? 'var(--red)' : 'var(--green)' }}>
+                      {isGain ? '+' : ''}
+                      {Number(h.returnPct).toFixed(1)}%
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      {Math.round(h.startingCash).toLocaleString()}원 → {Math.round(h.finalPortfolioValue).toLocaleString()}원
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
+                      {expanded ? '접기 ▴' : '채점 근거 보기 ▾'}
+                    </span>
+                  </div>
+                  {h.stats.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                      {h.stats.map((stat) => (
+                        <span
+                          key={stat.statKey}
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: '4px 9px',
+                            borderRadius: 999,
+                            background:
+                              stat.scorePct >= 70 ? 'var(--green-chip)' : stat.scorePct < 40 ? 'var(--red-chip)' : 'var(--chip)',
+                            color: stat.scorePct >= 70 ? 'var(--green)' : stat.scorePct < 40 ? 'var(--red)' : 'var(--soft)',
+                          }}
+                        >
+                          {SESSION_STAT_LABELS[stat.statKey]?.label ?? stat.statKey} {stat.scorePct}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+
+                {expanded && (
+                  <div style={{ padding: '0 18px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* 왜 이 점수인지 — 채점할 때 AI가 지표마다 남긴 한 문장.
+                        예전엔 칩의 title(툴팁)에만 있어서 마우스를 올려야 보였다. */}
+                    <div>
+                      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>이 점수를 준 근거</h4>
+                      {h.stats.length === 0 ? (
+                        <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>이 회차는 채점 기록이 없어요.</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {h.stats.map((stat) => (
+                            <div
+                              key={stat.statKey}
+                              style={{ borderTop: '1px solid var(--line)', paddingTop: 8, display: 'flex', gap: 10 }}
+                            >
+                              <span style={{ flexShrink: 0, width: 96, fontSize: 12, fontWeight: 700 }}>
+                                {SESSION_STAT_LABELS[stat.statKey]?.label ?? stat.statKey}
+                              </span>
+                              <span
+                                style={{
+                                  flexShrink: 0,
+                                  width: 40,
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  color: stat.scorePct >= 70 ? 'var(--green)' : stat.scorePct < 40 ? 'var(--red)' : 'var(--amber)',
+                                }}
+                              >
+                                {stat.scorePct}점
+                              </span>
+                              <span style={{ flex: 1, fontSize: 12, color: 'var(--soft)', lineHeight: 1.6 }}>{stat.note}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 그 회차 결과로 만든 문제 — 스탯 바로 밑에서 결과와 퀴즈를 같이 보게 한다. */}
+                    <div>
+                      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>이 회차에서 나온 문제</h4>
+                      {sessionQuizzes.length === 0 ? (
+                        <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+                          이 회차에서 만들어진 문제가 없어요.
+                        </p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {sessionQuizzes.map((q) => (
+                            <div key={q.id} style={{ borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                              <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
+                                {SESSION_STAT_LABELS[q.targetStatKey]?.label ?? q.targetStatKey} 지표를 겨냥한 문제
+                                {q.answered ? (q.correct ? ' · 정답' : ' · 오답') : ' · 아직 안 풀었어요'}
+                              </p>
+                              <strong style={{ display: 'block', fontSize: 13, lineHeight: 1.5 }}>{q.question}</strong>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, margin: '8px 0 0' }}>
+                                {q.options.map((opt) => {
+                                  const isMine = opt.id === q.answeredOptionId;
+                                  const isAnswer = q.answered && opt.id === q.correctOptionId;
+                                  return (
+                                    <div
+                                      key={opt.id}
+                                      style={{
+                                        fontSize: 12,
+                                        padding: '7px 10px',
+                                        borderRadius: 8,
+                                        border: `1px solid ${isAnswer ? 'var(--green)' : isMine ? 'var(--red)' : 'var(--line)'}`,
+                                        background: isAnswer ? 'var(--green-chip)' : isMine ? 'var(--red-chip)' : 'transparent',
+                                        color: 'var(--soft)',
+                                      }}
+                                    >
+                                      {opt.label}
+                                      {isMine ? ' · 내가 고른 답' : ''}
+                                      {isAnswer ? ' · 정답' : ''}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {q.explanation && (
+                                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--soft)', lineHeight: 1.6 }}>
+                                  해설: {q.explanation}
+                                </p>
+                              )}
+                              {q.sourceTitle && (
+                                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)' }}>
+                                  출처: {q.sourceOrgName ? `${q.sourceOrgName} · ` : ''}
+                                  {q.sourceTitle}
+                                  {q.sourcePageStart != null ? ` p.${q.sourcePageStart}` : ''}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

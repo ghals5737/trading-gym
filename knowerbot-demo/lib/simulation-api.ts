@@ -41,12 +41,20 @@ export interface PricePoint {
 }
 
 // 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터 — 뉴스가 있는 날짜는 드물어서
-// (가격이 크게 움직인 날 위주) 없을 때가 훨씬 많음(getStockNews가 204 반환).
-export interface StockNewsResponse {
+// (가격이 크게 움직인 날 위주) "오늘 뉴스"만 찾으면 거의 항상 비어 있다.
+// 그래서 공시와 같이 현재 거래일까지 나온 것 중 최신 몇 건을 받고, 며칠 전 뉴스인지
+// (daysAgo)를 같이 받아 화면에 표시한다.
+export interface StockNewsItemResponse {
   headline: string;
   summary: string;
   source: string;
   tradeDate: string;
+  daysAgo: number;
+}
+
+export interface StockNewsResponse {
+  stockCode: string;
+  items: StockNewsItemResponse[];
 }
 
 export interface StockHistoryResponse {
@@ -147,9 +155,10 @@ export function getStockHistory(sessionId: string, stockCode: string): Promise<S
   return request<StockHistoryResponse>(`/api/sessions/${sessionId}/stocks/${stockCode}/history`);
 }
 
-// 뉴스가 없는 날이 훨씬 많음(204 → null) — 프론트는 null이면 뉴스 카드를 안 보여주면 됨.
-export function getStockNews(sessionId: string, stockCode: string): Promise<StockNewsResponse | null> {
-  return request<StockNewsResponse | null>(`/api/sessions/${sessionId}/stocks/${stockCode}/news`);
+// 뉴스가 하나도 없어도 200 + 빈 목록 — 뉴스 섹터 자체는 항상 화면에 있고, 비어 있으면
+// 비었다고 말한다(예전엔 204일 때 섹터를 통째로 숨겨서 "뉴스가 빠진" 것처럼 보였음).
+export function getStockNews(sessionId: string, stockCode: string): Promise<StockNewsResponse> {
+  return request<StockNewsResponse>(`/api/sessions/${sessionId}/stocks/${stockCode}/news`);
 }
 
 export function getStockDisclosures(sessionId: string, stockCode: string): Promise<StockDisclosureResponse> {

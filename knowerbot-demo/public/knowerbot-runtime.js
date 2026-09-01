@@ -120,6 +120,8 @@ const seatShadowEl = document.getElementById('seat-shadow');
 const bubbleEl = document.getElementById('bot-bubble');
 const hitboxEl = document.getElementById('bot-hitbox');
 const closeEl = document.getElementById('bot-close');
+// 채팅창 헤더 안의 닫기 버튼 — 로봇을 따라다니는 #bot-close와 달리 항상 같은 자리에 있다.
+const chatCloseEl = document.getElementById('chat-close');
 const chatPanelEl = document.getElementById('chat-panel');
 const chatToggleEl = document.getElementById('chat-toggle');
 const chatLogEl = document.getElementById('chat-log');
@@ -344,6 +346,13 @@ function loadTexture(url, colorSpace) {
 
 if (hitboxEl) hitboxEl.addEventListener('click', enterChatMode);
 if (closeEl) closeEl.addEventListener('click', exitChatMode);
+if (chatCloseEl) {
+	chatCloseEl.addEventListener('click', (e) => {
+		// 헤더(#chat-toggle)로 클릭이 새어 올라가지 않게 — 헤더에 다른 핸들러가 붙어도 안전.
+		e.stopPropagation();
+		exitChatMode();
+	});
+}
 if (loginFormEl) {
   loginFormEl.addEventListener('submit', (event) => {
     event.preventDefault();

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "lightweight-charts": "^5.2.0",
+    "motion": "^13.1.1",
     "next": "^15.4.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

@@ -27,6 +27,16 @@ data class StatCategoryScoreResponse(
 	val scorePct: Int,
 	val description: String,
 	val higherIsBetter: Boolean, // false(공격성)면 좋고 나쁨이 아니라 "성향" — 프론트가 중립 색으로 그림
+	// 이 카테고리 점수를 만든 세부 지표들 — 리포트에서 "3개 성향 = 8개 지표"라는 구성을
+	// 화면으로 보여주려면 프론트가 매핑을 알아야 한다. 매핑을 프론트에 복사해두면
+	// StatCategoryCatalog와 어긋날 수 있어서 서버가 같이 내려준다.
+	//
+	// 기본값이 빈 목록인 이유: 온보딩 설문으로 만드는 초기 스탯(OnboardingService)은
+	// 8개 행동 지표가 아니라 설문 문항에서 나오므로 구성 지표가 없다.
+	val memberKeys: List<SessionStatKey> = emptyList(),
+	// 공격성처럼 (100 - 점수)로 뒤집어 평균 낸 카테고리인지 — 세부 지표 점수와 카테고리
+	// 점수가 반대 방향이라 화면에서 설명이 필요하다.
+	val reversed: Boolean = false,
 )
 
 data class StatOverviewResponse(
