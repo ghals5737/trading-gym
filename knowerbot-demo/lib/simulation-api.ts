@@ -41,10 +41,12 @@ export interface PricePoint {
 }
 
 // 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터 — 뉴스가 있는 날짜는 드물어서
-// (가격이 크게 움직인 날 위주) "오늘 뉴스"만 찾으면 거의 항상 비어 있다.
-// 그래서 공시와 같이 현재 거래일까지 나온 것 중 최신 몇 건을 받고, 며칠 전 뉴스인지
-// (daysAgo)를 같이 받아 화면에 표시한다.
+// (가격이 크게 움직인 날 위주) "오늘 뉴스"만 찾으면 거의 항상 비어 있다. 그래서 현재
+// 거래일까지 나온 것 중 최신 몇 건 + 며칠 전 뉴스인지(daysAgo)를 받아 화면에 표시한다.
+// stockCode/stockName은 세션 통합 뉴스(getSessionNews)에서만 채워짐.
 export interface StockNewsItemResponse {
+  stockCode?: string;
+  stockName?: string;
   headline: string;
   summary: string;
   source: string;
@@ -101,12 +103,14 @@ export interface TradeResponse {
 }
 
 // 지정가 주문은 회의 결정으로 제거됨 — 항상 시장가(그날 시가) 체결.
-// 미수(신용)도 요청 필드가 아님 — 현금보다 큰 매수면 서버가 부족분을 자동으로 미수로 잡음.
+// 미수(신용)는 기본은 현금보다 큰 매수면 서버가 부족분을 자동으로 미수로 잡지만, useCredit을
+// true로 보내면 현금이 충분해도 일부러 전액을 미수로 돌림(선택적 신용거래).
 export interface CreateTradeRequest {
   stockCode: string;
   side: TradeSide;
   quantity: number;
   viewedDisclosure?: boolean;
+  useCredit?: boolean;
   reasonText: string;
 }
 
@@ -159,6 +163,12 @@ export function getStockHistory(sessionId: string, stockCode: string): Promise<S
 // 비었다고 말한다(예전엔 204일 때 섹터를 통째로 숨겨서 "뉴스가 빠진" 것처럼 보였음).
 export function getStockNews(sessionId: string, stockCode: string): Promise<StockNewsResponse> {
   return request<StockNewsResponse>(`/api/sessions/${sessionId}/stocks/${stockCode}/news`);
+}
+
+// 지금 보는 종목 하나가 아니라 세션의 모든 종목을 통틀어 최근 뉴스를 모은 "뉴스 섹터" —
+// getStockNews는 종목 하나로 한정돼서 뉴스가 있는 날을 만나기가 너무 드물었음.
+export function getSessionNews(sessionId: string): Promise<StockNewsItemResponse[]> {
+  return request<StockNewsItemResponse[]>(`/api/sessions/${sessionId}/news`);
 }
 
 export function getStockDisclosures(sessionId: string, stockCode: string): Promise<StockDisclosureResponse> {

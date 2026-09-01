@@ -200,8 +200,6 @@ class SimulationService(
 		)
 	}
 
-	// 그 종목의 실제 뉴스(고정 데이터) 중 세션 현재 거래일 이전이거나 같은 날짜의 가장
-	// 최근 것 하나 — 뉴스가 있는 날짜는 드물어서(가격이 크게 움직인 날 위주) "오늘"만
 	// 그 종목의 뉴스(고정 데이터) — 세션 현재 거래일까지 나온 것 중 최신 3건.
 	// 며칠 전 뉴스인지는 daysAgo로 같이 내려보내고, 보여줄지 말지는 화면이 정한다.
 	fun getStockNews(username: String, sessionId: UUID, stockCode: String): StockNewsResponse {
@@ -218,6 +216,29 @@ class SimulationService(
 				)
 			}
 		return StockNewsResponse(stockCode = stockCode, items = items)
+	}
+
+	// getStockNews는 지금 보고 있는 종목 하나로 한정돼서, 세션에 종목이 여럿이면 최근
+	// NEWS_LOOKBACK_DAYS 안에 아무 뉴스도 없는 경우가 훨씬 많았음(뉴스 자체가 종목당 드문
+	// 고정 데이터라서) — 그래서 화면에서 "뉴스 섹터"가 거의 안 보이는 것처럼 느껴짐.
+	// 이 함수는 보고 있는 종목과 상관없이 세션의 모든 종목을 통틀어 최근 뉴스를 모아줌.
+	fun getSessionNews(username: String, sessionId: UUID): List<StockNewsItemResponse> {
+		val session = requireOwnedSession(username, sessionId)
+		val rangeStart = session.currentTurnDate.minusDays(NEWS_LOOKBACK_DAYS.toLong())
+		return stockNewsRepository.findByTradeDateBetweenOrderByTradeDateAsc(rangeStart, session.currentTurnDate)
+			.sortedByDescending { it.tradeDate }
+			.map { news ->
+				val price = stockDailyPriceRepository.findByStockCodeAndTradeDate(news.stockCode, news.tradeDate)
+				StockNewsItemResponse(
+					stockCode = news.stockCode,
+					stockName = price?.stockName,
+					headline = news.headline,
+					summary = news.summary,
+					source = news.source,
+					tradeDate = news.tradeDate,
+					daysAgo = ChronoUnit.DAYS.between(news.tradeDate, session.currentTurnDate),
+				)
+			}
 	}
 
 	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 것 중 최신 3건.
@@ -259,15 +280,23 @@ class SimulationService(
 		val filled = true
 		val executionPrice: BigDecimal = marketPrice.openPrice
 
-		// 미수(신용) 매수 — 별도 토글 없이, 현금보다 큰 금액을 매수하면 부족분이 자동으로
-		// 미수금(빌린 돈)으로 잡힘(실제 미수거래처럼 계좌를 마이너스로 당기는 개념).
+		// 미수(신용) 매수 — 기본은 현금보다 큰 금액을 매수하면 부족분이 자동으로 미수금(빌린 돈)으로
+		// 잡힘(실제 미수거래처럼 계좌를 마이너스로 당기는 개념). useCredit=true면 현금이 충분해도
+		// 일부러 매수금액의 최소 CREDIT_MIN_BORROW_RATIO(40%)를 미수로 돌림 — 현금 60%+미수 40%로
+		// 같은 현금으로 더 많이 살 수 있게 하는 선택적 신용거래(현금이 그보다 부족하면 기존처럼
+		// 부족분 전체가 미수로 잡힘 — 40%는 최솟값이지 상한이 아님).
 		// 한도는 담보비율: 매수 직후 (현금+보유평가)/미수금이 유지비율(140%) 아래로
 		// 떨어지는 매수는 거부 — 허용하면 사자마자 반대매매가 나가는 자멸 매수가 됨.
 		var cashPaid: BigDecimal? = null
 		var borrowedPortion: BigDecimal? = null
 		if (filled && request.side == TradeSide.BUY) {
 			val positionValue = executionPrice.multiply(BigDecimal(request.quantity))
-			val shortfall = positionValue.subtract(session.currentCash).max(BigDecimal.ZERO)
+			val autoShortfall = positionValue.subtract(session.currentCash).max(BigDecimal.ZERO)
+			val shortfall = if (request.useCredit) {
+				positionValue.multiply(CREDIT_MIN_BORROW_RATIO).max(autoShortfall)
+			} else {
+				autoShortfall
+			}
 			cashPaid = positionValue.subtract(shortfall)
 			borrowedPortion = shortfall
 			if (shortfall > BigDecimal.ZERO) {
@@ -644,11 +673,18 @@ class SimulationService(
 
 	companion object {
 		private val MAINTENANCE_RATIO = BigDecimal("1.4") // 담보 유지비율 140% (RiskInterventionModal mock 수치와 동일)
+		private val CREDIT_MIN_BORROW_RATIO = BigDecimal("0.4") // 선택적 신용거래(useCredit) 시 매수금액의 최소 40%를 미수로 돌림(현금 60%+미수 40%, 회의 결정)
+		// 세션 통합 뉴스(getSessionNews)가 "최근"으로 쳐주는 달력일 범위 — 이보다 오래된
+		// 뉴스는 통합 섹션에 안 나옴(종목별 getStockNews는 daysAgo 표기로 대신함).
+		private const val NEWS_LOOKBACK_DAYS = 14
+
 		const val MAX_TURNS = 10 // 세션당 최대 턴 수 — 턴 단위(하루/일주일/한달)와 무관하게 동일하게 적용 (회의 결정: 10턴)
 
 		// 미수금(신용매수 대출) 상환 기한 — 발생 턴부터 이 턴 수 안에 못 갚으면
-		// debtOverdue가 켜지고 투자성향(스탯) 채점에 부정적으로 반영됨.
-		const val DEBT_REPAY_TURN_LIMIT = 10
+		// debtOverdue가 켜지고 투자성향(스탯) 채점에 부정적으로 반영됨. MAX_TURNS(10)와
+		// 같은 값이면 세션이 끝날 때까지 기한 초과가 절대 발생할 수 없어서(발생 턴+10 > 10),
+		// 세션 안에서 실제로 걸릴 수 있게 훨씬 짧게 잡음(회의 결정: 3턴).
+		const val DEBT_REPAY_TURN_LIMIT = 3
 
 		// 사용자가 고르는 시작일~종료일 사이에 최소 이만큼의 실제 거래일은 있어야 함 —
 		// MAX_TURNS와 같은 수치로 맞춰서, 제일 촘촘한 하루 단위로 20턴을 다 채워도

@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'motion/react';
 import TopNav from '../../components/TopNav';
 import PriceChart from '../../components/PriceChart';
+import RewindChart from '../../components/RewindChart';
 import LoginButton from '../../components/LoginButton';
 import { stockDetail, riskIntervention } from '../../lib/mock-data';
 import {
@@ -13,7 +13,7 @@ import {
   createSession,
   getQuotes,
   getStockHistory,
-  getStockNews,
+  getSessionNews,
   getStockDisclosures,
   recordTrade,
   listTrades,
@@ -27,7 +27,6 @@ import {
   type TradeResponse,
   type TurnUnit,
   type PricePoint,
-  type StockNewsResponse,
   type StockNewsItemResponse,
   type StockDisclosureResponse,
   type SessionStatScoreResponse,
@@ -47,14 +46,17 @@ const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일�
 // 이유 메모 최소 길이. 한두 글자짜리 메모는 행동 리포트에서 쓸 수가 없어서 최소한만 강제한다.
 const MIN_REASON_LENGTH = 5;
 
-// 받침 유무에 따라 이/가를 고름 — "하루가 지났어요" / "일주일이 지났어요".
-// 턴 단위 라벨이 3개뿐이라 표로 박아도 되지만, 라벨이 늘어나도 안 깨지게 계산으로 둔다.
-function subjectParticle(word: string): string {
-  const last = word.charCodeAt(word.length - 1);
-  const isHangul = last >= 0xac00 && last <= 0xd7a3;
-  if (!isHangul) return '가';
-  return (last - 0xac00) % 28 > 0 ? '이' : '가';
-}
+// 턴 전환 애니메이션(아래 playTurnTransition 참고) 관련 상수 — 이번 턴에 새로 늘어난 구간이
+// 세션 시작부터의 전체 히스토리 축척에 묻히지 않도록, 최근 구간만 잘라서 보여줌.
+const TURN_TRANSITION_MS = 900;
+const TURN_TRANSITION_WINDOW = 20;
+
+// 선택적 신용거래(useCredit) 시 매수금액의 최소 이 비율을 미수로 돌림 — 백엔드
+// CREDIT_MIN_BORROW_RATIO와 동일(현금 60%+미수 40%, 회의 결정).
+const CREDIT_MIN_BORROW_RATIO = 0.4;
+
+// 미수금 상환 기한(발생 턴 + 이 턴 수) — 백엔드 SimulationService.DEBT_REPAY_TURN_LIMIT과 동일.
+const DEBT_REPAY_TURN_LIMIT = 3;
 
 declare global {
   interface Window {
@@ -172,9 +174,19 @@ export default function SimulationClient() {
   const [trades, setTrades] = useState<TradeResponse[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
   const [historyPoints, setHistoryPoints] = useState<PricePoint[]>([]);
-  const [stockNews, setStockNews] = useState<StockNewsResponse | null>(null);
+  const [turnAnimation, setTurnAnimation] = useState<{ prices: number[]; visibleCount: number } | null>(null);
+  // 턴 넘기기 직전 종가를 담아두는 ref — historyPoints 재조회 effect가 이 값이 채워져 있으면
+  // "턴 전환으로 새로 불러온 것"으로 판단해 playTurnTransition 애니메이션을 튼다.
+  const pendingTurnPrevCloseRef = useRef<number[] | null>(null);
+  // 지금 보는 종목 하나가 아니라 세션의 모든 종목을 통틀어 최근 뉴스를 모은 "뉴스 섹터".
+  const [sessionNews, setSessionNews] = useState<StockNewsItemResponse[]>([]);
+  const [selectedNews, setSelectedNews] = useState<StockNewsItemResponse | null>(null);
 
   const [quantity, setQuantity] = useState(10);
+  // 켜두면 현금이 충분해도 이번 매수금액의 최소 CREDIT_MIN_BORROW_RATIO(40%)를 미수(빌린 돈)로
+  // 돌림 — 현금 60%+미수 40%로 같은 현금으로 더 살 수 있는 선택적 신용거래.
+  // 꺼두면 기존처럼 현금 초과분만 자동으로 미수가 됨.
+  const [useCredit, setUseCredit] = useState(false);
   const [pendingReason, setPendingReason] = useState('');
   const [asking, setAsking] = useState(false);
   // 메모창 상태 — resolve를 들고 있다가 사용자가 확인/취소하면 askReason의 프라미스를 푼다.
@@ -183,8 +195,7 @@ export default function SimulationClient() {
     resolve: (value: string | null) => void;
   } | null>(null);
   const [reasonDraft, setReasonDraft] = useState('');
-  // 열어본 뉴스 1건(모달) — 예전엔 boolean이었는데 뉴스가 여러 건 내려오므로 어떤 건지 들고 있음.
-  const [openNewsItem, setOpenNewsItem] = useState<StockNewsItemResponse | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
   const [showRisk, setShowRisk] = useState(false);
   const [pendingRiskRatio, setPendingRiskRatio] = useState<number | null>(null);
   // AI가 만드는 위험 경고 문구 — 담보비율 계산이 끝나자마자(모달을 띄우는 시점에) 같이
@@ -199,9 +210,6 @@ export default function SimulationClient() {
     { sessionId: string; startingCash: number; finalValue: number; returnPct: number; reason?: string; stats?: SessionStatScoreResponse[] } | null
   >(null);
   const [ending, setEnding] = useState(false);
-  // 턴이 넘어간 직후 잠깐 뜨는 전환 연출 — 며칠이 흘렀는지 눈에 보이게 해서
-  // "다음 턴을 눌렀는데 뭐가 바뀐 거지?"를 없애려는 것.
-  const [turnFlash, setTurnFlash] = useState<{ turn: number; date: string; unit: TurnUnit } | null>(null);
   const [repaying, setRepaying] = useState(false);
   // 세션이 끝나자마자 그 세션 "단독" 스탯 결과로만 문제 하나를 뽑아서 종료 화면에 바로 보여줌
   // (오늘의 PT처럼 유저 전체 평균이 아니라 방금 끝난 세션 결과만 봄).
@@ -324,32 +332,55 @@ export default function SimulationClient() {
     })();
   }, [session]);
 
-  // 선택 종목 또는 턴이 바뀌면 차트(어제까지의 OHLC)도 다시 불러옴
+  // 선택 종목 또는 턴이 바뀌면 차트(어제까지의 OHLC)도 다시 불러옴 — 턴 전환으로 불러온
+  // 거면(pendingTurnPrevCloseRef가 채워져있으면) 새로 늘어난 구간만 애니메이션으로 보여줌.
   useEffect(() => {
     if (!session || !activeCode) return;
-    getStockHistory(session.id, activeCode).then((h) => setHistoryPoints(h.points));
+    getStockHistory(session.id, activeCode).then((h) => {
+      const prevClosePrices = pendingTurnPrevCloseRef.current;
+      pendingTurnPrevCloseRef.current = null;
+      setHistoryPoints(h.points);
+      if (prevClosePrices && h.points.length > prevClosePrices.length) {
+        playTurnTransition(
+          prevClosePrices,
+          h.points.map((p) => p.closePrice),
+        );
+      }
+    });
   }, [session, activeCode]);
 
-  // 선택 종목 또는 턴이 바뀌면 그 종목의 실제 뉴스(고정 데이터)도 다시 불러옴.
-  // 뉴스 섹터는 항상 화면에 있고, 이 종목에 아직 뉴스가 없으면 "없다"고 말한다 —
-  // 예전엔 없을 때 카드를 통째로 숨겼는데 시드 뉴스가 드물어 사실상 늘 숨겨져 있었다.
+  // 턴을 넘기면 그 사이 건너뛴 거래일들의 종가가 한 번에 화면에 나타나는데, 그걸 순간이동처럼
+  // 뚝 바뀌는 대신 RewindChart로 이어그려서 보여줌. 세션 시작부터의 전체 히스토리를 다 넣으면
+  // 축척상 이번 턴 구간이 너무 작아 보이므로, 직전 맥락 TURN_TRANSITION_WINDOW개 + 새로
+  // 늘어난 구간만 잘라서 씀.
+  function playTurnTransition(prevClosePrices: number[], newClosePrices: number[]) {
+    const startIdx = Math.max(0, prevClosePrices.length - TURN_TRANSITION_WINDOW);
+    const windowPrices = newClosePrices.slice(startIdx);
+    const startCount = prevClosePrices.length - startIdx;
+    const totalCount = windowPrices.length;
+    setTurnAnimation({ prices: windowPrices, visibleCount: startCount });
+    let i = startCount;
+    const stepMs = TURN_TRANSITION_MS / Math.max(1, totalCount - startCount);
+    const timer = window.setInterval(() => {
+      i += 1;
+      setTurnAnimation({ prices: windowPrices, visibleCount: Math.min(i, totalCount) });
+      if (i >= totalCount) {
+        window.clearInterval(timer);
+        window.setTimeout(() => setTurnAnimation(null), 500);
+      }
+    }, stepMs);
+  }
+
+  // 턴이 바뀌면 세션의 모든 종목을 통틀어 최근 뉴스(고정 데이터)도 다시 불러옴 — 종목
+  // 하나로 한정하면 뉴스가 있는 날을 만나기가 너무 드물어서, 지금 보는 종목과 상관없이
+  // 세션 전체 기준으로 모음(뉴스 섹터).
   useEffect(() => {
-    if (!session || !activeCode) {
-      setStockNews(null);
+    if (!session) {
+      setSessionNews([]);
       return;
     }
-    setOpenNewsItem(null);
-    getStockNews(session.id, activeCode)
-      .then(setStockNews)
-      .catch(() => setStockNews({ stockCode: activeCode, items: [] }));
-  }, [session, activeCode]);
-
-  // 턴 전환 연출은 잠깐만 띄우고 스스로 사라진다.
-  useEffect(() => {
-    if (!turnFlash) return;
-    const timer = window.setTimeout(() => setTurnFlash(null), 1300);
-    return () => window.clearTimeout(timer);
-  }, [turnFlash]);
+    getSessionNews(session.id).then(setSessionNews);
+  }, [session]);
 
   // 종목이나 턴이 바뀌면 공시 패널을 다시 접는다 — "이 종목의 공시를 이번 턴에 확인했는지"를
   // 매번 새로 판단하게 하려는 것. 이미 열어본 종목+턴이면 내용은 캐시 없이 다시 불러온다.
@@ -371,6 +402,10 @@ export default function SimulationClient() {
 
   const active = quotes.find((q) => q.stockCode === activeCode);
   const estimate = (active?.openPrice ?? 0) * quantity;
+  // 주문 패널에 미리 보여줄 현금/미수 분담 미리보기 — attemptBuy의 실제 계산과 동일한 규칙.
+  const shortfallPreview = useCredit
+    ? Math.max(estimate * CREDIT_MIN_BORROW_RATIO, Math.max(0, estimate - (session?.currentCash ?? 0)))
+    : Math.max(0, estimate - (session?.currentCash ?? 0));
   const prevClose = historyPoints[historyPoints.length - 1]?.closePrice;
   const changePct = active && prevClose ? ((active.openPrice - prevClose) / prevClose) * 100 : 0;
   const sparklinePoints = active ? [...historyPoints.map((p) => p.closePrice), active.openPrice] : historyPoints.map((p) => p.closePrice);
@@ -385,7 +420,7 @@ export default function SimulationClient() {
   // 담보비율 = (현금 + 보유종목 평가액) / 대출원금 — 백엔드 checkMarginCall과 동일한 계산.
   const collateralRatioPct = borrowedAmount > 0 ? (portfolioValue / borrowedAmount) * 100 : null;
   // 주문 도우미 — 현재 종목 기준 "얼마나 살 수 있고, 얼마나 들고 있는지".
-  // 매수 한도는 서버 검증과 같은 식: 매수 직후 담보비율 (보유평가+현금잔여+포지션)/(미수)가
+  // 신용 최대치는 서버 검증과 같은 식: 매수 직후 담보비율 (보유평가+현금잔여+포지션)/(미수)가
   // 140% 아래로 떨어지지 않는 최대 금액. V ≤ (H + 1.4·현금 − 1.4·미수) / 0.4
   const activePrice = active?.openPrice ?? 0;
   const cashOnlyQty = activePrice > 0 && session ? Math.floor(session.currentCash / activePrice) : 0;
@@ -434,6 +469,7 @@ export default function SimulationClient() {
         quantity,
         // 이번 턴에 이 종목의 공시 요약 패널을 열어봤는지 — 공시 확인율 스탯의 원천.
         viewedDisclosure: viewedDisclosureKeys.has(`${active.stockCode}:${session.turnCount}`),
+        useCredit: side === 'BUY' ? useCredit : undefined,
         reasonText: reason,
       });
       const [s] = await Promise.all([getActiveSession(), refreshAndDetectLiquidation(session.id, prevTradeIds)]);
@@ -478,7 +514,7 @@ export default function SimulationClient() {
       return;
     }
     setAsking(true);
-    const shortfall = Math.max(0, estimate - session.currentCash);
+    const shortfall = shortfallPreview;
     const reason = await askReason(
       `${active.stockName} ${quantity}주를 ${shortfall > 0 ? '미수(빌린 돈)까지 써서 ' : ''}매수하려는 이유가 뭐예요?`,
     );
@@ -492,7 +528,8 @@ export default function SimulationClient() {
     // 매수 직후 예상 담보비율이 유지비율에 가까우면 위험 개입 모달을 먼저 보여줌 —
     // 온보딩에서 "위험한 조합"으로 진단된 사용자는 경고 버퍼를 더 크게 잡아 더 일찍 경고함.
     if (shortfall > 0) {
-      const cashAfter = Math.max(0, session.currentCash - estimate);
+      const cashPaid = estimate - shortfall;
+      const cashAfter = Math.max(0, session.currentCash - cashPaid);
       const newBorrowed = borrowedAmount + shortfall;
       const newEquity = cashAfter + holdingsValue + estimate;
       const expectedRatio = newBorrowed > 0 ? (newEquity / newBorrowed) * 100 : Infinity;
@@ -572,12 +609,16 @@ export default function SimulationClient() {
     }
     setActionResult(null);
     const prevTradeIds = new Set(trades.map((t) => t.id));
+    // 턴 넘기기 직전 종가를 미리 저장해둠 — 성공하면 이 값을 히스토리 재조회 effect가
+    // 새 종가와 비교해서 이번 턴에 새로 늘어난 구간만 애니메이션으로 보여줌(playTurnTransition).
+    pendingTurnPrevCloseRef.current = historyPoints.map((p) => p.closePrice);
     try {
       const s = await advanceTurn(session.id, turnUnitChoice, holdReason);
       await refreshAndDetectLiquidation(session.id, prevTradeIds);
       // 넘기려는 기간이 시세 데이터 범위를 벗어나면 백엔드가 에러 대신 세션을 바로
       // COMPLETED로 종료해서 돌려줌 — 이때는 다음 턴으로 안 넘어가고 종료 화면을 보여줌.
       if (s.status === 'COMPLETED') {
+        pendingTurnPrevCloseRef.current = null;
         // 자동 종료도 서버가 AI 채점을 이미 끝낸 상태 — 결과 화면에 채점을 같이 보여줌.
         const stats = await getSessionStats(s.id).catch(() => undefined);
         setCompletedSummary({
@@ -593,8 +634,8 @@ export default function SimulationClient() {
         return;
       }
       setSession(s);
-      setTurnFlash({ turn: s.turnCount, date: s.currentTurnDate, unit: turnUnitChoice });
     } catch (e) {
+      pendingTurnPrevCloseRef.current = null;
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '더 이상 진행할 거래일이 없어요' });
     }
   }
@@ -929,8 +970,7 @@ export default function SimulationClient() {
         }
       />
       <div style={{ maxWidth: 'min(1600px, 94vw)', margin: '0 auto', padding: '32px 40px 90px' }}>
-        {/* 오른쪽 열은 공시 + 종목 상세 두 패널을 세로로 담게 되면서 조금 넓혔다(300 -> 340). */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 440px 340px', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 440px 300px', gap: 24 }}>
           {/* left: chart / news / stats */}
           <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="result-card" style={{ minHeight: 294 }}>
@@ -938,15 +978,7 @@ export default function SimulationClient() {
                 <strong style={{ fontSize: 18 }}>{active.stockName}</strong>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{active.stockCode}</span>
               </div>
-              {/* 턴이 바뀔 때마다 key가 바뀌면서 값이 새로 밀려 올라온다 — 숫자가 소리 없이
-                  갈리는 대신 "바뀌었다"가 보이게. 차트 캔버스는 key에서 빼서 다시 안 그린다. */}
-              <motion.div
-                key={`${active.stockCode}-${session.turnCount}`}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.32, ease: 'easeOut' }}
-                style={{ display: 'flex', gap: 10, alignItems: 'baseline', margin: '10px 0' }}
-              >
+              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', margin: '10px 0' }}>
                 <strong style={{ fontSize: 30 }}>{active.openPrice.toLocaleString()}원</strong>
                 <span
                   style={{
@@ -961,43 +993,33 @@ export default function SimulationClient() {
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                   {session.turnCount}/{session.maxTurns}턴 · {session.currentTurnDate} 시가 · {session.targetEndDate}에 종료 예정
                 </span>
-              </motion.div>
-              <PriceChart
-                points={historyPoints}
-                todayOpenPrice={active.openPrice}
-                todayDate={session.currentTurnDate}
-                height={220}
-              />
+              </div>
+              {turnAnimation ? (
+                <RewindChart prices={turnAnimation.prices} visibleCount={turnAnimation.visibleCount} />
+              ) : (
+                <PriceChart
+                  points={historyPoints}
+                  todayOpenPrice={active.openPrice}
+                  todayDate={session.currentTurnDate}
+                  height={220}
+                />
+              )}
             </div>
 
-            {/* 뉴스 — 공시 패널과 같이 섹션 자체는 항상 있고, 이 종목에 아직 뉴스가 없으면
-                없다고 말한다. 며칠 전 뉴스인지 같이 보여줘서 오래된 뉴스를 오늘 뉴스로
-                오해하지 않게 한다. */}
-            <div className="result-card" style={{ minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <h3 style={{ fontSize: 13, margin: 0 }}>{active.stockName} 뉴스</h3>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {session.currentTurnDate}까지 나온 소식
-                </span>
-              </div>
-              {stockNews == null ? (
-                <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>불러오는 중...</p>
-              ) : stockNews.items.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                  이 시점까지 이 종목에 등록된 뉴스가 없어요. 공시와 차트를 근거로 판단해보세요.
-                </p>
-              ) : (
-                stockNews.items.map((item) => (
+            {sessionNews.length > 0 && (
+              <div className="result-card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <h3 style={{ fontSize: 13, margin: 0 }}>이번 턴 뉴스</h3>
+                {sessionNews.map((news, i) => (
                   <button
-                    key={`${item.tradeDate}-${item.headline}`}
-                    onClick={() => setOpenNewsItem(item)}
+                    key={`${news.stockCode}-${news.tradeDate}-${i}`}
+                    onClick={() => setSelectedNews(news)}
                     style={{
                       display: 'flex',
                       gap: 8,
                       alignItems: 'center',
-                      padding: '9px 10px',
-                      background: 'var(--white)',
-                      border: '1px solid var(--line)',
+                      padding: '10px 12px',
+                      background: 'var(--bg)',
+                      border: 0,
                       borderRadius: 12,
                       cursor: 'pointer',
                       textAlign: 'left',
@@ -1007,22 +1029,36 @@ export default function SimulationClient() {
                     <span
                       style={{
                         flexShrink: 0,
-                        background: item.daysAgo <= 3 ? 'var(--green-chip)' : 'var(--chip)',
-                        color: item.daysAgo <= 3 ? 'var(--green)' : 'var(--soft)',
+                        background: 'var(--green-chip)',
+                        color: 'var(--green)',
                         fontSize: 11,
                         fontWeight: 800,
                         borderRadius: 999,
                         padding: '3px 9px',
                       }}
                     >
-                      {item.daysAgo <= 0 ? '오늘' : `${item.daysAgo}일 전`}
+                      {news.stockName ?? '뉴스'}
                     </span>
-                    <span style={{ fontSize: 13, color: 'var(--soft)', flex: 1 }}>{item.headline}</span>
+                    {/* 며칠 전 뉴스인지 — 오래된 뉴스가 방금 나온 것처럼 보이지 않게 (최근 3일이면 초록) */}
+                    <span
+                      style={{
+                        flexShrink: 0,
+                        background: news.daysAgo <= 3 ? 'var(--green-chip)' : 'var(--chip)',
+                        color: news.daysAgo <= 3 ? 'var(--green)' : 'var(--soft)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: 999,
+                        padding: '3px 8px',
+                      }}
+                    >
+                      {news.daysAgo <= 0 ? '오늘' : `${news.daysAgo}일 전`}
+                    </span>
+                    <span style={{ fontSize: 13, color: 'var(--soft)', flex: 1 }}>{news.headline}</span>
                     <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>자세히 ›</span>
                   </button>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
 
             {/* 턴·기간 진행률 — 둘 중 먼저 끝나는 쪽에서 모의고사가 종료됨 */}
             <div className="result-card" style={{ minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1078,7 +1114,8 @@ export default function SimulationClient() {
             </div>
 
             {borrowedAmount > 0 && (
-              // 미수금 상환 기한 경고 — 10턴 안에 못 갚으면 투자성향 평가에 부정적으로 반영됨(회의 결정).
+              // 미수금 상환 기한 경고 — 발생 턴+3턴 안에 못 갚으면 투자성향 평가에 부정적으로
+              // 반영됨(회의 결정, 백엔드 DEBT_REPAY_TURN_LIMIT과 동일).
               <div
                 style={{
                   padding: '12px 14px',
@@ -1171,10 +1208,8 @@ export default function SimulationClient() {
                 <button
                   key={q.stockCode}
                   onClick={() => {
-                    // 누르면 바로 전환만 한다 — 예전엔 상세보기 모달이 같이 떠서
-                    // 종목을 바꿀 때마다 모달을 닫아야 했다(전환 흐름에 한 단계가 껴 있었음).
-                    // 상세 정보는 오른쪽 DART 패널 아래에 항상 떠 있으므로 모달이 필요 없다.
                     setActiveCode(q.stockCode);
+                    setShowDetail(true);
                   }}
                   style={{
                     display: 'flex',
@@ -1245,50 +1280,23 @@ export default function SimulationClient() {
                   </button>
                 </div>
               </div>
-              {/* 매수/매도 판단에 필요한 수량 정보 — 누르면 그 수량으로 바로 세팅됨 */}
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setQuantity(Math.max(1, cashOnlyQty))}
-                  disabled={cashOnlyQty <= 0}
-                  className="btn btn-sm"
-                  title="현금만으로 살 수 있는 최대 수량"
-                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: 'var(--soft)', border: '1px solid var(--line)' }}
-                >
-                  현금으로 {cashOnlyQty.toLocaleString()}주
-                </button>
-                <button
-                  onClick={() => setQuantity(Math.max(1, maxBuyQty))}
-                  disabled={maxBuyQty <= 0}
-                  className="btn btn-sm"
-                  title="미수(빌린 돈)까지 써서 살 수 있는 최대 수량 — 담보비율 140% 한도"
-                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: 'var(--amber)', border: '1px solid var(--amber)' }}
-                >
-                  미수까지 최대 {maxBuyQty.toLocaleString()}주
-                </button>
-                <button
-                  onClick={() => setQuantity(Math.max(1, ownedQty))}
-                  disabled={ownedQty <= 0}
-                  className="btn btn-sm"
-                  title="이 종목 보유 수량 — 누르면 전량 매도 수량으로 세팅"
-                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: ownedQty > 0 ? 'var(--green)' : 'var(--muted)', border: '1px solid var(--line)' }}
-                >
-                  보유 {ownedQty.toLocaleString()}주
-                </button>
-              </div>
-              {/* 총 자산(현금+보유평가) 대비 몇 %어치를 살지 — 누르면 그 금액만큼의 수량으로 맞춰줌.
-                  100%는 현금을 넘을 수 있는데, 그땐 부족분이 자동으로 미수로 잡힘(아래 경고 참고). */}
+              {/* 보유 중인 주식은 결제에 못 쓰고 매수는 오직 현금(또는 미수)으로만 되기 때문에,
+                  총 자산(현금+보유평가) 기준으로 수량을 맞추면 실제로는 현금이 부족해서 신용거래
+                  토글을 안 켰는데도 자동으로 미수가 잡히는 문제가 있었음 — 그래서 현금 기준으로
+                  변경. 100%를 눌러도 현금 전액이라 자동 미수는 안 생기고, 신용거래 토글을
+                  켜야만 그보다 더 살 수 있음. */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, flexShrink: 0 }}>총 자산 대비</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, flexShrink: 0 }}>현금 대비</span>
                 <div style={{ display: 'flex', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
                   {[10, 25, 50, 100].map((pct) => {
-                    const pctQuantity = Math.max(1, Math.floor((portfolioValue * pct) / 100 / active.openPrice));
+                    const pctQuantity = Math.max(1, Math.floor((session.currentCash * pct) / 100 / active.openPrice));
                     const isActive = quantity === pctQuantity;
                     return (
                       <button
                         key={pct}
                         onClick={() => setQuantity(pctQuantity)}
                         className="btn btn-sm"
-                        title={`약 ${Math.round((portfolioValue * pct) / 100).toLocaleString()}원어치 (${pctQuantity}주)`}
+                        title={`약 ${Math.round((session.currentCash * pct) / 100).toLocaleString()}원어치 (${pctQuantity}주)`}
                         style={{
                           padding: '4px 10px',
                           fontSize: 12,
@@ -1304,23 +1312,73 @@ export default function SimulationClient() {
                   })}
                 </div>
               </div>
+              {/* 매수/매도 판단에 필요한 수량 정보 — 누르면 그 수량으로 바로 세팅됨.
+                  신용 최대치는 담보비율 140% 한도 역산(서버 거부선과 동일) — 신용거래 토글을
+                  켰을 때만 그 수량으로 실제 매수가 가능함. */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setQuantity(Math.max(1, cashOnlyQty))}
+                  disabled={cashOnlyQty <= 0}
+                  className="btn btn-sm"
+                  title="현금만으로 살 수 있는 최대 수량"
+                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: 'var(--soft)', border: '1px solid var(--line)' }}
+                >
+                  현금으로 {cashOnlyQty.toLocaleString()}주
+                </button>
+                <button
+                  onClick={() => setQuantity(Math.max(1, maxBuyQty))}
+                  disabled={maxBuyQty <= 0}
+                  className="btn btn-sm"
+                  title="신용(미수)까지 써서 살 수 있는 최대 수량 — 담보비율 140% 한도"
+                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: 'var(--amber)', border: '1px solid var(--amber)' }}
+                >
+                  신용까지 최대 {maxBuyQty.toLocaleString()}주
+                </button>
+                <button
+                  onClick={() => setQuantity(Math.max(1, ownedQty))}
+                  disabled={ownedQty <= 0}
+                  className="btn btn-sm"
+                  title="이 종목 보유 수량 — 누르면 전량 매도 수량으로 세팅"
+                  style={{ padding: '4px 10px', fontSize: 11.5, background: 'var(--white)', color: ownedQty > 0 ? 'var(--green)' : 'var(--muted)', border: '1px solid var(--line)' }}
+                >
+                  보유 {ownedQty.toLocaleString()}주
+                </button>
+              </div>
+              {/* 기본은 현금 초과분만 자동으로 미수가 되지만, 켜두면 현금이 남아있어도 이번
+                  매수금액의 최소 40%(CREDIT_MIN_BORROW_RATIO)를 일부러 미수로 돌림 — 현금
+                  60%+미수 40%로 같은 현금으로 더 살 수 있게. 현금이 그보다 부족하면 기존처럼
+                  부족분 전체가 미수로 잡힘(40%는 최솟값). */}
+              <button
+                onClick={() => setUseCredit((v) => !v)}
+                className="btn btn-sm"
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  background: useCredit ? 'var(--amber-chip)' : 'var(--white)',
+                  color: useCredit ? 'var(--amber)' : 'var(--soft)',
+                  border: `1px solid ${useCredit ? 'transparent' : 'var(--line)'}`,
+                }}
+              >
+                {useCredit ? '✓ ' : ''}신용거래로 매수 (증거금 60% · 미수 40%)
+              </button>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                 예상 금액 {estimate.toLocaleString()}원 (시장가 · 시가 기준) · 총 자산의{' '}
                 {portfolioValue > 0 ? Math.round((estimate / portfolioValue) * 100) : 0}%
               </p>
-              {estimate > session.currentCash && (
+              {useCredit ? (
                 <p style={{ margin: 0, fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
-                  현금을 {Math.round(estimate - session.currentCash).toLocaleString()}원 넘는 매수예요 — 부족분은
-                  미수(빌린 돈)로 잡히고 10턴 안에 갚아야 해요.
+                  현금 {Math.round(estimate - shortfallPreview).toLocaleString()}원 + 미수(빌린 돈){' '}
+                  {Math.round(shortfallPreview).toLocaleString()}원으로 매수해요 — 미수는 {DEBT_REPAY_TURN_LIMIT}턴 안에 갚아야 해요.
                 </p>
+              ) : (
+                estimate > session.currentCash && (
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
+                    현금을 {Math.round(estimate - session.currentCash).toLocaleString()}원 넘는 매수예요 — 부족분은
+                    미수(빌린 돈)로 잡히고 {DEBT_REPAY_TURN_LIMIT}턴 안에 갚아야 해요.
+                  </p>
+                )
               )}
-              {/* 빌려서 사는 방식이 왜 따로 켜고 끄는 스위치가 아닌지 — 미수는 실제로도
-                  "현금이 모자란 채로 주문이 체결되면 자동으로 발생하는 것"이라 선택 항목이
-                  아니다. 켜고 끌 수 있는 건 신용융자(별도 대출 상품)인데 여긴 안 다룬다. */}
-              <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)', lineHeight: 1.55 }}>
-                여기서 쓰는 건 <b>미수거래</b>예요 — 현금보다 큰 주문이 체결되면 모자란 만큼 자동으로 발생해요.
-                실제 미수도 따로 신청하거나 끄는 게 아니라 이렇게 생겨요. (미리 한도를 빌려두는 <b>신용융자</b>는 여기서 다루지 않아요.)
-              </p>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
                 매수·매도 버튼을 누르면 판단한 이유를 적는 메모창이 떠요.
               </p>
@@ -1376,13 +1434,9 @@ export default function SimulationClient() {
             </div>
           </section>
 
-          {/* right: DART 공시 요약 + 그 아래 종목 상세.
-              공시는 매수 전 확인해야 할 판단요소이고, "열어본" 행동이 viewedDisclosure로
-              매매 기록에 남아 공시 확인율 스탯의 원천이 된다.
-              종목 상세는 예전엔 종목을 누를 때 뜨는 모달이었는데, 종목 전환을 막지 않도록
-              이 열 아래쪽에 항상 떠 있게 바꿨다. */}
-          <aside style={{ alignSelf: 'start', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="result-card" style={{ minHeight: 0, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* right: DART 공시 요약 — 매수 전 확인해야 할 판단요소. "열어본" 행동이
+              viewedDisclosure로 매매 기록에 남아 공시 확인율 스탯의 원천이 된다. */}
+          <aside className="result-card" style={{ minHeight: 0, padding: 20, alignSelf: 'start', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div>
               <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>DART 공시 요약</h3>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
@@ -1416,63 +1470,21 @@ export default function SimulationClient() {
                 </div>
               ))
             )}
-          </div>
-
-          <StockDetailPanel
-            stockName={active.stockName}
-            stockCode={active.stockCode}
-            price={active.openPrice}
-            changePct={changePct}
-            chart={sparklinePoints}
-          />
           </aside>
         </div>
       </div>
 
-      {/* 턴 전환 연출 — 며칠이 흘렀고 지금 몇 턴인지 잠깐 띄웠다가 스스로 사라진다.
-          pointerEvents: none 이라 뜨는 동안에도 화면 조작을 막지 않는다. */}
-      <AnimatePresence>
-        {turnFlash && (
-          <motion.div
-            key={turnFlash.turn}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 25,
-              display: 'grid',
-              placeItems: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 18, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -14, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-              style={{
-                background: 'var(--white)',
-                border: '1px solid var(--line)',
-                borderRadius: 18,
-                padding: '18px 26px',
-                boxShadow: '0 20px 50px rgba(28, 32, 24, 0.22)',
-                textAlign: 'center',
-              }}
-            >
-              <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: 'var(--green)' }}>
-                {TURN_UNIT_LABELS[turnFlash.unit]}
-                {subjectParticle(TURN_UNIT_LABELS[turnFlash.unit])} 지났어요
-              </p>
-              <strong style={{ display: 'block', margin: '6px 0 2px', fontSize: 22 }}>{turnFlash.date}</strong>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{turnFlash.turn}턴째</span>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {openNewsItem && <NewsDetailModal news={openNewsItem} onClose={() => setOpenNewsItem(null)} />}
+      {showDetail && (
+        <StockDetailModal
+          stockName={active.stockName}
+          stockCode={active.stockCode}
+          price={active.openPrice}
+          changePct={changePct}
+          chart={sparklinePoints}
+          onClose={() => setShowDetail(false)}
+        />
+      )}
+      {selectedNews && <NewsDetailModal news={selectedNews} onClose={() => setSelectedNews(null)} />}
       {reasonPrompt && (
         <div className="modal-overlay">
           <div className="modal-card">
@@ -1679,13 +1691,12 @@ function NewsDetailModal({ news, onClose }: { news: StockNewsItemResponse; onClo
             padding: '3px 9px',
           }}
         >
-          뉴스
+          {news.stockName ?? '뉴스'}
         </span>
         <h3 style={{ margin: 0, fontSize: 17, lineHeight: 1.4 }}>{news.headline}</h3>
         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: 'var(--soft)' }}>{news.summary}</p>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>
           {news.tradeDate} · {news.source}
-          {news.daysAgo > 0 ? ` · ${news.daysAgo}일 전 뉴스예요` : ' · 오늘 나온 뉴스예요'}
         </span>
         <button onClick={onClose} className="btn btn-primary btn-block">
           확인
@@ -1695,82 +1706,137 @@ function NewsDetailModal({ news, onClose }: { news: StockNewsItemResponse; onClo
   );
 }
 
-// 가격/차트는 실제 데이터, 시가총액·PER·재무제표 등은 아직 mock (OpenDART 연동 전).
-// 종목 상세 — 예전엔 종목을 누를 때 뜨는 모달이었는데, 오른쪽 DART 공시 패널 아래에
-// 항상 떠 있는 패널로 바꿨다. 공시(무슨 일이 있었나)와 종목 기본정보(어떤 회사인가)를
-// 한 열에서 위아래로 같이 보게 하려는 것.
-//
-// 재무제표 요약 표는 여기서 뺐다 — DART 공시 요약과 다루는 내용이 겹쳐 보인다는
-// 피드백이 있었고, 실제로 이 표는 종목과 무관한 고정 예시값이라 공시(실제 시드 데이터)와
-// 나란히 두면 어느 쪽이 진짜인지 헷갈린다. 재무 정보는 DART 패널이 맡는다.
-function StockDetailPanel({
+// 가격/차트는 실제 데이터, 시가총액·PER 등은 아직 mock (OpenDART 연동 전) — 재무제표 요약은
+// DART 공시 요약 패널과 중복돼서 뺐음(공시 쪽이 실제 데이터라 그쪽이 우선).
+function StockDetailModal({
   stockName,
   stockCode,
   price,
   changePct,
   chart,
+  onClose,
 }: {
   stockName: string;
   stockCode: string;
   price: number;
   changePct: number;
   chart: number[];
+  onClose: () => void;
 }) {
   return (
-    <div className="result-card" style={{ minHeight: 0, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div>
-        <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>종목 상세</h3>
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
-          {stockName} · {stockCode}
-        </p>
-      </div>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 30,
+        background: 'rgba(13, 18, 10, 0.55)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 'min(520px, 100%)',
+          maxHeight: '86vh',
+          overflowY: 'auto',
+          background: 'var(--white)',
+          borderRadius: 20,
+          padding: 28,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          boxShadow: '0 24px 60px rgba(13, 18, 10, 0.3)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20 }}>{stockName}</h2>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>{stockCode}</p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 999,
+              border: 0,
+              background: 'var(--chip)',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-        <strong style={{ fontSize: 24 }}>{price.toLocaleString()}원</strong>
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 800,
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: changePct >= 0 ? 'var(--red-chip)' : 'var(--green-chip)',
-            color: changePct >= 0 ? 'var(--red)' : 'var(--green)',
-          }}
-        >
-          {changePct >= 0 ? '+' : ''}
-          {changePct.toFixed(1)}%
-        </span>
-      </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+          <strong style={{ fontSize: 30 }}>{price.toLocaleString()}원</strong>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 800,
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: changePct >= 0 ? 'var(--red-chip)' : 'var(--green-chip)',
+              color: changePct >= 0 ? 'var(--red)' : 'var(--green)',
+            }}
+          >
+            {changePct >= 0 ? '+' : ''}
+            {changePct.toFixed(1)}%
+          </span>
+        </div>
 
-      <div style={{ height: 84, background: 'var(--red-chip)', borderRadius: 12 }}>
-        <Sparkline points={chart} color="var(--red)" />
-      </div>
+        <div style={{ height: 110, background: 'var(--red-chip)', borderRadius: 12 }}>
+          <Sparkline points={chart} color="var(--red)" />
+        </div>
 
-      <div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           {[
             ['시가총액', stockDetail.marketCap],
             ['거래량', stockDetail.volume],
             ['52주 최고', stockDetail.high52w],
             ['52주 최저', stockDetail.low52w],
-            ['PER', stockDetail.per],
-            ['PBR', stockDetail.pbr],
-            ['ROE', stockDetail.roe],
-            ['배당수익률', stockDetail.dividendYield],
           ].map(([label, value]) => (
-            <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: '9px 11px' }}>
-              <small style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', fontWeight: 600 }}>
+            <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: 12 }}>
+              <small style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
                 {label}
               </small>
-              <strong style={{ fontSize: 13 }}>{value}</strong>
+              <strong style={{ fontSize: 14 }}>{value}</strong>
             </div>
           ))}
         </div>
-        {/* 아직 종목별 실제 값이 아니라 예시값이라, 그렇다고 화면에 밝혀둔다 —
-            바로 위 DART 공시는 실제 시드 데이터라 둘을 구분해줘야 오해가 없다. */}
-        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
-          위 지표는 아직 종목별 실제 값이 아닌 <b>예시값</b>이에요. 실제 재무·공시 정보는 위 DART 공시 요약을 봐주세요.
-        </p>
+
+        <div>
+          <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>투자 지표</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+            {[
+              ['PER', stockDetail.per],
+              ['PBR', stockDetail.pbr],
+              ['ROE', stockDetail.roe],
+              ['배당수익률', stockDetail.dividendYield],
+            ].map(([label, value]) => (
+              <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: 12 }}>
+                <small style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+                  {label}
+                </small>
+                <strong style={{ fontSize: 14 }}>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>이 종목은요</h3>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--soft)', lineHeight: 1.6 }}>
+            {stockDetail.about}
+          </p>
+        </div>
+
+        <button onClick={onClose} className="btn btn-primary btn-block">
+          이 종목 주문하러 가기
+        </button>
       </div>
     </div>
   );
@@ -1799,7 +1865,7 @@ function RiskInterventionModal({
   // fallbackResult와 같은 결).
   const warningText =
     aiMessage ??
-    `지금 미수로 ${quantity}를 매수하면 담보비율이 ${ratioLabel}까지 떨어져요. ` +
+    `지금 신용매수 ${quantity}를 진행하면 담보비율이 ${ratioLabel}까지 떨어져요. ` +
       `${riskIntervention.liquidationThreshold} 아래로 내려가면 — 내 의사와 상관없이 반대매매가 발생할 수 있어요.`;
   return (
     <div

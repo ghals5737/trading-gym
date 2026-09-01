@@ -29,10 +29,13 @@ data class StockHistoryResponse(
 )
 
 // 실제 있었던 뉴스를 손으로 골라 채운 고정 데이터(StockNews) 기반 — 뉴스가 있는 날짜는
-// 드물어서 "오늘" 것만 보여주면 거의 항상 비어 있다. 그래서 공시와 같이 "현재 거래일까지
-// 나온 것 중 최신 몇 건"을 내려주고, 며칠 전 뉴스인지(daysAgo)를 같이 줘서 화면이
-// 오래된 뉴스를 방금 나온 것처럼 보이지 않게 한다.
+// 드물어서 "오늘" 것만 보여주면 거의 항상 비어 있다. 그래서 현재 거래일까지 나온 것 중
+// 최신 몇 건을 내려주고, 며칠 전 뉴스인지(daysAgo)도 같이 줘서 오래된 뉴스가 방금 나온
+// 것처럼 보이지 않게 한다. stockCode/stockName은 세션 통합 뉴스(getSessionNews)에서만
+// 채워짐 — 종목 하나짜리 getStockNews는 호출부가 이미 어떤 종목인지 알아서 null.
 data class StockNewsItemResponse(
+	val stockCode: String? = null,
+	val stockName: String? = null,
 	val headline: String,
 	val summary: String,
 	val source: String,

@@ -13,6 +13,7 @@ import com.tradinggym.backend.dto.SessionStatScoreResponse
 import com.tradinggym.backend.dto.SessionSummaryResponse
 import com.tradinggym.backend.dto.StockHistoryResponse
 import com.tradinggym.backend.dto.StockDisclosureResponse
+import com.tradinggym.backend.dto.StockNewsItemResponse
 import com.tradinggym.backend.dto.StockNewsResponse
 import com.tradinggym.backend.dto.TradeResponse
 import com.tradinggym.backend.dto.TurnLogResponse
@@ -93,6 +94,12 @@ class SimulationController(
 		@PathVariable sessionId: UUID,
 		@PathVariable stockCode: String,
 	): StockNewsResponse = simulationService.getStockNews(authentication.name, sessionId, stockCode)
+
+	// 세션의 모든 종목을 통틀어 최근 뉴스를 모은 "뉴스 섹터" — getStockNews는 지금 보는
+	// 종목 하나로 한정돼서 뉴스가 있는 날을 만나기가 너무 드물었음. 없으면 빈 목록.
+	@GetMapping("/{sessionId}/news")
+	fun getSessionNews(authentication: Authentication, @PathVariable sessionId: UUID): List<StockNewsItemResponse> =
+		simulationService.getSessionNews(authentication.name, sessionId)
 
 	// 그 종목의 DART 공시 요약(고정 데이터) — 세션 현재 거래일까지 나온 최신 3건.
 	// 공시가 하나도 없어도 200 + 빈 목록(패널 자체는 항상 열 수 있게).

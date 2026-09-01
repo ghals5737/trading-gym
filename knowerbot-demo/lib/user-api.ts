@@ -49,6 +49,14 @@ export interface StatCategoryScoreResponse {
   reversed: boolean;
 }
 
+// 3개 대분류가 어느 8개 세부 지표로 구성되는지 — 백엔드 StatCategoryCatalog.DEFINITIONS와
+// 동일한 매핑. 마이페이지 리포트에서 카테고리 카드 아래 그 구성 지표를 바로 붙여 보여줄 때 씀.
+export const CATEGORY_MEMBER_KEYS: Record<'ACCURACY' | 'COMPOSURE' | 'AGGRESSIVENESS', SessionStatKey[]> = {
+  ACCURACY: ['JUDGMENT_ACCURACY', 'DISCLOSURE_CHECK_RATE', 'CONFIRMATION_BIAS'],
+  COMPOSURE: ['IMPULSIVE_TRADING', 'LOSS_AVERSION', 'GAMBLING_SIGNAL'],
+  AGGRESSIVENESS: ['RISK_MANAGEMENT_SCORE', 'DIVERSIFICATION'],
+};
+
 export interface StatOverviewResponse {
   summaryText: string;
   categories: StatCategoryScoreResponse[];

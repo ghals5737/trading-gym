@@ -479,6 +479,50 @@ h1 {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* ---------- 마이페이지 스탯 카드(정확성/침착성/공격성) 플립 — 앞: 점수, 뒤: 구성 세부 지표 ---------- */
+.category-flip-wrap {
+  perspective: 1800px;
+}
+.category-flip-card {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+  transform-style: preserve-3d;
+}
+.category-flip-card.is-flipped {
+  transform: rotateY(180deg);
+}
+.category-flip-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--white);
+  padding: 18px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.category-flip-face.category-flip-back {
+  transform: rotateY(180deg);
+}
+.category-flip-btn {
+  margin-top: auto;
+  align-self: flex-end;
+  background: none;
+  border: 0;
+  color: var(--green);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+}
 .summary-card {
   display: grid;
   grid-template-columns: 1fr auto;
