@@ -195,7 +195,6 @@ export default function SimulationClient() {
     resolve: (value: string | null) => void;
   } | null>(null);
   const [reasonDraft, setReasonDraft] = useState('');
-  const [showDetail, setShowDetail] = useState(false);
   const [showRisk, setShowRisk] = useState(false);
   const [pendingRiskRatio, setPendingRiskRatio] = useState<number | null>(null);
   // AI가 만드는 위험 경고 문구 — 담보비율 계산이 끝나자마자(모달을 띄우는 시점에) 같이
@@ -513,6 +512,21 @@ export default function SimulationClient() {
       setActionResult({ type: 'warning', message: '수량을 1주 이상 입력해주세요.' });
       return;
     }
+    // 매수 한도 — 신용거래를 안 켰으면 현금까지만, 켰으면 담보비율(140%) 한도까지.
+    if (!useCredit && quantity > cashOnlyQty) {
+      setActionResult({
+        type: 'warning',
+        message: `현금으로는 ${cashOnlyQty.toLocaleString()}주까지 살 수 있어요. 더 사려면 신용거래를 켜주세요 (신용 포함 최대 ${maxBuyQty.toLocaleString()}주).`,
+      });
+      return;
+    }
+    if (useCredit && quantity > maxBuyQty) {
+      setActionResult({
+        type: 'warning',
+        message: `신용을 포함해도 최대 ${maxBuyQty.toLocaleString()}주까지예요 — 담보비율 140% 아래로 내려가는 매수는 안 돼요.`,
+      });
+      return;
+    }
     setAsking(true);
     const shortfall = shortfallPreview;
     const reason = await askReason(
@@ -580,6 +594,16 @@ export default function SimulationClient() {
     if (!session || !active || asking) return;
     if (quantity < 1) {
       setActionResult({ type: 'warning', message: '수량을 1주 이상 입력해주세요.' });
+      return;
+    }
+    // 매도 한도 — 이 종목 보유 수량까지만.
+    if (quantity > ownedQty) {
+      setActionResult({
+        type: 'warning',
+        message: ownedQty > 0
+          ? `${active.stockName}은(는) ${ownedQty.toLocaleString()}주 보유 중이에요 — 그만큼만 팔 수 있어요.`
+          : `${active.stockName}을(를) 보유하고 있지 않아 매도할 수 없어요.`,
+      });
       return;
     }
     setAsking(true);
@@ -970,7 +994,7 @@ export default function SimulationClient() {
         }
       />
       <div style={{ maxWidth: 'min(1600px, 94vw)', margin: '0 auto', padding: '32px 40px 90px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 440px 300px', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) 440px 340px', gap: 24 }}>
           {/* left: chart / news / stats */}
           <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="result-card" style={{ minHeight: 294 }}>
@@ -1207,10 +1231,7 @@ export default function SimulationClient() {
               {quotes.map((q) => (
                 <button
                   key={q.stockCode}
-                  onClick={() => {
-                    setActiveCode(q.stockCode);
-                    setShowDetail(true);
-                  }}
+                  onClick={() => setActiveCode(q.stockCode)}
                   style={{
                     display: 'flex',
                     width: '100%',
@@ -1470,20 +1491,20 @@ export default function SimulationClient() {
                 </div>
               ))
             )}
+
+            {/* 종목 상세 — 예전엔 종목을 누를 때 뜨는 모달이었는데, DART 공시 아래 상시
+                패널로 변경. 종목 리스트에서 종목을 누르면 공시·상세가 즉시 같이 바뀐다. */}
+            <StockDetailPanel
+              stockName={active.stockName}
+              stockCode={active.stockCode}
+              price={active.openPrice}
+              changePct={changePct}
+              chart={sparklinePoints}
+            />
           </aside>
         </div>
       </div>
 
-      {showDetail && (
-        <StockDetailModal
-          stockName={active.stockName}
-          stockCode={active.stockCode}
-          price={active.openPrice}
-          changePct={changePct}
-          chart={sparklinePoints}
-          onClose={() => setShowDetail(false)}
-        />
-      )}
       {selectedNews && <NewsDetailModal news={selectedNews} onClose={() => setSelectedNews(null)} />}
       {reasonPrompt && (
         <div className="modal-overlay">
@@ -1708,135 +1729,79 @@ function NewsDetailModal({ news, onClose }: { news: StockNewsItemResponse; onClo
 
 // 가격/차트는 실제 데이터, 시가총액·PER 등은 아직 mock (OpenDART 연동 전) — 재무제표 요약은
 // DART 공시 요약 패널과 중복돼서 뺐음(공시 쪽이 실제 데이터라 그쪽이 우선).
-function StockDetailModal({
+
+// 종목 상세 — 예전엔 종목을 누를 때 뜨는 모달이었는데, 오른쪽 DART 공시 패널 아래에
+// 항상 떠 있는 패널로 바꿨다. 공시(무슨 일이 있었나)와 종목 기본정보(어떤 회사인가)를
+// 한 열에서 위아래로 같이 보게 하려는 것. 종목 리스트를 누르면 즉시 전환된다.
+// 가격/차트는 실제 데이터, 시가총액·PER 등 지표는 아직 mock (OpenDART 연동 전).
+function StockDetailPanel({
   stockName,
   stockCode,
   price,
   changePct,
   chart,
-  onClose,
 }: {
   stockName: string;
   stockCode: string;
   price: number;
   changePct: number;
   chart: number[];
-  onClose: () => void;
 }) {
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 30,
-        background: 'rgba(13, 18, 10, 0.55)',
-        display: 'grid',
-        placeItems: 'center',
-        padding: 24,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          width: 'min(520px, 100%)',
-          maxHeight: '86vh',
-          overflowY: 'auto',
-          background: 'var(--white)',
-          borderRadius: 20,
-          padding: 28,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          boxShadow: '0 24px 60px rgba(13, 18, 10, 0.3)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{stockName}</h2>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>{stockCode}</p>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 999,
-              border: 0,
-              background: 'var(--chip)',
-              cursor: 'pointer',
-            }}
-          >
-            ✕
-          </button>
-        </div>
+    <div className="result-card" style={{ minHeight: 0, padding: 20, display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
+      <div>
+        <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>종목 상세</h3>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+          {stockName} · {stockCode}
+        </p>
+      </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-          <strong style={{ fontSize: 30 }}>{price.toLocaleString()}원</strong>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 800,
-              padding: '3px 8px',
-              borderRadius: 999,
-              background: changePct >= 0 ? 'var(--red-chip)' : 'var(--green-chip)',
-              color: changePct >= 0 ? 'var(--red)' : 'var(--green)',
-            }}
-          >
-            {changePct >= 0 ? '+' : ''}
-            {changePct.toFixed(1)}%
-          </span>
-        </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+        <strong style={{ fontSize: 24 }}>{price.toLocaleString()}원</strong>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 800,
+            padding: '3px 8px',
+            borderRadius: 999,
+            background: changePct >= 0 ? 'var(--red-chip)' : 'var(--green-chip)',
+            color: changePct >= 0 ? 'var(--red)' : 'var(--green)',
+          }}
+        >
+          {changePct >= 0 ? '+' : ''}
+          {changePct.toFixed(1)}%
+        </span>
+      </div>
 
-        <div style={{ height: 110, background: 'var(--red-chip)', borderRadius: 12 }}>
-          <Sparkline points={chart} color="var(--red)" />
-        </div>
+      <div style={{ height: 84, background: 'var(--red-chip)', borderRadius: 12 }}>
+        <Sparkline points={chart} color="var(--red)" />
+      </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+      <div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
           {[
             ['시가총액', stockDetail.marketCap],
             ['거래량', stockDetail.volume],
             ['52주 최고', stockDetail.high52w],
             ['52주 최저', stockDetail.low52w],
+            ['PER', stockDetail.per],
+            ['PBR', stockDetail.pbr],
+            ['ROE', stockDetail.roe],
+            ['배당수익률', stockDetail.dividendYield],
           ].map(([label, value]) => (
-            <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: 12 }}>
-              <small style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+            <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: '9px 11px' }}>
+              <small style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', fontWeight: 600 }}>
                 {label}
               </small>
-              <strong style={{ fontSize: 14 }}>{value}</strong>
+              <strong style={{ fontSize: 13 }}>{value}</strong>
             </div>
           ))}
         </div>
-
-        <div>
-          <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>투자 지표</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-            {[
-              ['PER', stockDetail.per],
-              ['PBR', stockDetail.pbr],
-              ['ROE', stockDetail.roe],
-              ['배당수익률', stockDetail.dividendYield],
-            ].map(([label, value]) => (
-              <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: 12 }}>
-                <small style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
-                  {label}
-                </small>
-                <strong style={{ fontSize: 14 }}>{value}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>이 종목은요</h3>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--soft)', lineHeight: 1.6 }}>
-            {stockDetail.about}
-          </p>
-        </div>
-
-        <button onClick={onClose} className="btn btn-primary btn-block">
-          이 종목 주문하러 가기
-        </button>
+        {/* 아직 종목별 실제 값이 아니라 예시값이라, 그렇다고 화면에 밝혀둔다 —
+            바로 위 DART 공시는 실제 시드 데이터라 둘을 구분해줘야 오해가 없다. */}
+        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+          위 지표는 아직 종목별 실제 값이 아닌 <b>예시값</b>이에요. 실제 재무·공시 정보는 위 DART 공시 요약을 봐주세요.
+        </p>
       </div>
     </div>
   );
