@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import PriceChart from '../../components/PriceChart';
@@ -45,6 +46,15 @@ const TURN_UNIT_LABELS: Record<TurnUnit, string> = { DAY: '하루', WEEK: '일�
 
 // 이유 메모 최소 길이. 한두 글자짜리 메모는 행동 리포트에서 쓸 수가 없어서 최소한만 강제한다.
 const MIN_REASON_LENGTH = 5;
+
+// 받침 유무에 따라 이/가를 고름 — "하루가 지났어요" / "일주일이 지났어요".
+// 턴 단위 라벨이 3개뿐이라 표로 박아도 되지만, 라벨이 늘어나도 안 깨지게 계산으로 둔다.
+function subjectParticle(word: string): string {
+  const last = word.charCodeAt(word.length - 1);
+  const isHangul = last >= 0xac00 && last <= 0xd7a3;
+  if (!isHangul) return '가';
+  return (last - 0xac00) % 28 > 0 ? '이' : '가';
+}
 
 // 턴 전환 애니메이션(아래 playTurnTransition 참고) 관련 상수 — 이번 턴에 새로 늘어난 구간이
 // 세션 시작부터의 전체 히스토리 축척에 묻히지 않도록, 최근 구간만 잘라서 보여줌.
@@ -187,6 +197,8 @@ export default function SimulationClient() {
   // 돌림 — 현금 60%+미수 40%로 같은 현금으로 더 살 수 있는 선택적 신용거래.
   // 꺼두면 기존처럼 현금 초과분만 자동으로 미수가 됨.
   const [useCredit, setUseCredit] = useState(false);
+  // 턴 전환 연출("하루가 지났어요") — 잠깐 떴다가 스스로 사라지는 팝업.
+  const [turnFlash, setTurnFlash] = useState<{ turn: number; date: string; unit: TurnUnit } | null>(null);
   const [pendingReason, setPendingReason] = useState('');
   const [asking, setAsking] = useState(false);
   // 메모창 상태 — resolve를 들고 있다가 사용자가 확인/취소하면 askReason의 프라미스를 푼다.
@@ -380,6 +392,13 @@ export default function SimulationClient() {
     }
     getSessionNews(session.id).then(setSessionNews);
   }, [session]);
+
+  // 턴 전환 연출은 잠깐만 띄우고 스스로 사라진다.
+  useEffect(() => {
+    if (!turnFlash) return;
+    const timer = window.setTimeout(() => setTurnFlash(null), 1300);
+    return () => window.clearTimeout(timer);
+  }, [turnFlash]);
 
   // 종목이나 턴이 바뀌면 공시 패널을 다시 접는다 — "이 종목의 공시를 이번 턴에 확인했는지"를
   // 매번 새로 판단하게 하려는 것. 이미 열어본 종목+턴이면 내용은 캐시 없이 다시 불러온다.
@@ -658,6 +677,8 @@ export default function SimulationClient() {
         return;
       }
       setSession(s);
+      // 턴 전환 연출 — 며칠이 흘렀고 지금 몇 턴인지 잠깐 보여줌.
+      setTurnFlash({ turn: s.turnCount, date: s.currentTurnDate, unit: turnUnitChoice });
     } catch (e) {
       pendingTurnPrevCloseRef.current = null;
       setActionResult({ type: 'error', message: e instanceof Error ? e.message : '더 이상 진행할 거래일이 없어요' });
@@ -1505,6 +1526,49 @@ export default function SimulationClient() {
         </div>
       </div>
 
+      {/* 턴 전환 연출 — 며칠이 흘렀고 지금 몇 턴인지 잠깐 띄웠다가 스스로 사라진다.
+          pointerEvents: none 이라 뜨는 동안에도 화면 조작을 막지 않는다. */}
+      <AnimatePresence>
+        {turnFlash && (
+          <motion.div
+            key={turnFlash.turn}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 25,
+              display: 'grid',
+              placeItems: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -14, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              style={{
+                background: 'var(--white)',
+                border: '1px solid var(--line)',
+                borderRadius: 18,
+                padding: '18px 26px',
+                boxShadow: '0 20px 50px rgba(28, 32, 24, 0.22)',
+                textAlign: 'center',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: 'var(--green)' }}>
+                {TURN_UNIT_LABELS[turnFlash.unit]}
+                {subjectParticle(TURN_UNIT_LABELS[turnFlash.unit])} 지났어요
+              </p>
+              <strong style={{ display: 'block', margin: '6px 0 2px', fontSize: 22 }}>{turnFlash.date}</strong>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{turnFlash.turn}턴째</span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {selectedNews && <NewsDetailModal news={selectedNews} onClose={() => setSelectedNews(null)} />}
       {reasonPrompt && (
         <div className="modal-overlay">
