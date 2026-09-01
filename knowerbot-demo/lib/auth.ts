@@ -7,7 +7,9 @@ const LOGGED_IN_KEY = 'kg_logged_in';
 
 export function apiBaseUrl(): string {
   // Keep in sync with API_BASE in public/knowerbot-runtime.js.
-  return `${window.location.protocol}//${window.location.hostname}:8079`;
+  // 배포(프론트=Cloudflare, 백엔드=EC2)에서는 빌드 시 NEXT_PUBLIC_API_BASE로 백엔드 주소를
+  // 주입함(예: https://api.example.com). 미설정이면 로컬 개발 가정(같은 호스트의 :8079).
+  return process.env.NEXT_PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8079`;
 }
 
 export function getAccessToken(): string | null {

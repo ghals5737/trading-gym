@@ -45,9 +45,13 @@ class SecurityConfig(
 	// see reference_knowerbot_demo_location memory) calls this API from a
 	// different origin. No cookies are used (JWT travels in the Authorization
 	// header), so credentials don't need to be allowed.
+	// 배포 시(프론트=Cloudflare, 백엔드=EC2) 프론트 도메인을 CORS_ALLOWED_ORIGINS 환경변수로
+	// 추가함 — 쉼표 구분, 예: CORS_ALLOWED_ORIGINS=https://trading-gym.pages.dev,https://tg.example.com
 	private fun corsConfigurationSource(): CorsConfigurationSource {
 		val config = CorsConfiguration()
-		config.allowedOriginPatterns = listOf("http://localhost:*", "http://127.0.0.1:*", "http://192.168.*.*:*")
+		val extraOrigins = (System.getenv("CORS_ALLOWED_ORIGINS") ?: "")
+			.split(",").map { it.trim() }.filter { it.isNotBlank() }
+		config.allowedOriginPatterns = listOf("http://localhost:*", "http://127.0.0.1:*", "http://192.168.*.*:*") + extraOrigins
 		config.allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 		config.allowedHeaders = listOf("*")
 		val source = UrlBasedCorsConfigurationSource()
