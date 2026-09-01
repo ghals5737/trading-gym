@@ -5,7 +5,8 @@ import Link from 'next/link';
 import TopNav from '../../components/TopNav';
 import LoginButton from '../../components/LoginButton';
 import StatTriangleChart from '../../components/StatTriangleChart';
-import { aiCharacter, user } from '../../lib/mock-data';
+import StatTrendChart, { type StatTrendSeries } from '../../components/StatTrendChart';
+import { user } from '../../lib/mock-data';
 import { getMyInvestorProfile, type InvestorProfileResponse } from '../../lib/onboarding-api';
 import { RISK_COPY, KNOWLEDGE_COPY, INFO_HABIT_COPY, headlineFor, warningFor, courseFor } from '../../lib/onboarding-copy';
 import {
@@ -14,11 +15,13 @@ import {
   updateMyAgeBand,
   getMyPeerComparison,
   SESSION_STAT_LABELS,
+  CATEGORY_MEMBER_KEYS,
   AGE_BAND_LABELS,
   type StatOverviewResponse,
-  type SessionStatKey,
   type AgeBand,
   type PeerComparisonResponse,
+  type StatCategoryScoreResponse,
+  type AggregateStatResponse,
 } from '../../lib/user-api';
 import { getSessionHistory, type SessionHistoryItemResponse } from '../../lib/simulation-api';
 
@@ -185,38 +188,6 @@ function ProfileTab() {
         <button className="btn btn-secondary btn-sm">정보 수정</button>
       </div>
 
-      <div className="tier-card">
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <span style={{ fontSize: 44 }} aria-hidden>
-            🤖
-          </span>
-          <div style={{ flex: 1 }}>
-            <span className="tier-label">나의 AI 캐릭터</span>
-            <div className="tier-name">
-              {aiCharacter.name} · Lv.{aiCharacter.level}
-            </div>
-            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>{aiCharacter.tier}</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
-          <span>다음 레벨까지</span>
-          <span>
-            {aiCharacter.xp} / {aiCharacter.xpToNext} XP
-          </span>
-        </div>
-        <div className="xp-track">
-          <div className="xp-fill" style={{ width: `${(aiCharacter.xp / aiCharacter.xpToNext) * 100}%` }} />
-        </div>
-        <div className="tier-metric-row">
-          {aiCharacter.xpSources.map((s) => (
-            <div className="tier-metric" key={s.label}>
-              <strong>{s.value}</strong>
-              <span>{s.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <h3 style={{ fontSize: 15, margin: 0 }}>계정 설정</h3>
       <div style={{ background: 'var(--white)', border: '1px solid var(--line)', borderRadius: 14 }}>
         {['알림 설정', '비밀번호 변경', '구독 및 결제'].map((item, i, arr) => (
@@ -306,8 +277,6 @@ function DiagnosisTab() {
 
       <InitialCategoryCards scores={profile.initialCategoryScores} />
 
-      <PeerComparisonCard />
-
       {warning && (
         <div
           style={{
@@ -359,6 +328,9 @@ function DiagnosisTab() {
     </>
   );
 }
+
+// 사전조사 리스크 축 만점 — 사전조사 결과 탭의 "리스크 X/20" 표기와 동일 기준.
+const PEER_RISK_SCORE_MAX = 20;
 
 // "내 또래 대비 투자성향" — 나이대를 아직 안 알려줬으면 선택 UI를 먼저 보여주고,
 // 선택하는 즉시 또래 비교 문구로 바뀐다. 또래 데이터가 없으면 안내 문구만 나온다.
@@ -423,22 +395,71 @@ function PeerComparisonCard() {
   if (!comparison) return null;
 
   const diff = comparison.myRiskScore - comparison.peerAvgRiskScore;
+  // 사전조사 리스크 축 만점 — 마이페이지 사전조사 결과 탭의 "리스크 X/20" 표기와 동일 기준.
+  const myPct = (comparison.myRiskScore / PEER_RISK_SCORE_MAX) * 100;
+  const peerPct = (comparison.peerAvgRiskScore / PEER_RISK_SCORE_MAX) * 100;
   return (
     <div className="result-card" style={{ width: '100%', textAlign: 'left', padding: 18 }}>
       <span className="result-tag">또래 비교 · {AGE_BAND_LABELS[comparison.ageBand]}</span>
       <h3 style={{ margin: '8px 0 6px', fontSize: 15 }}>{comparison.comparisonText}</h3>
       {comparison.peerCount > 0 && (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
-          내 공격성(리스크 감수) 점수 {comparison.myRiskScore}점 · 또래 평균{' '}
-          {comparison.peerAvgRiskScore.toFixed(1)}점 ({diff >= 0 ? '+' : ''}
-          {diff.toFixed(1)}) · 비교 대상 {comparison.peerCount}명
-        </p>
+        <>
+          {/* 내 점수는 막대 채우기로, 또래 평균은 그 위 세로 마커선으로 겹쳐 보여줌. */}
+          <div style={{ position: 'relative', height: 12, borderRadius: 999, background: 'var(--chip)', overflow: 'visible', margin: '6px 0 10px' }}>
+            <div style={{ width: `${myPct}%`, height: '100%', borderRadius: 999, background: 'var(--green)' }} />
+            <div
+              title={`또래 평균 ${comparison.peerAvgRiskScore.toFixed(1)}점`}
+              style={{
+                position: 'absolute',
+                left: `${peerPct}%`,
+                top: -3,
+                width: 3,
+                height: 18,
+                background: 'var(--soft)',
+                transform: 'translateX(-1px)',
+              }}
+            />
+          </div>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)', lineHeight: 1.6 }}>
+            내 공격성(리스크 감수) 점수 {comparison.myRiskScore}점 · 또래 평균 {comparison.peerAvgRiskScore.toFixed(1)}점
+            <br />({diff >= 0 ? '+' : ''}
+            {diff.toFixed(1)}) · 비교 대상 {comparison.peerCount}명
+          </p>
+        </>
       )}
     </div>
   );
 }
 
-const STAT_KEYS = Object.keys(SESSION_STAT_LABELS) as SessionStatKey[];
+
+// 회차별 추이 차트에서 3분류를 구분하는 고정 색 — result 카드에서 쓰는 tone(초록/빨강/앰버)은
+// "좋다/나쁘다"를 뜻해서 여기선 안 맞고, 세 선을 그냥 구분만 하면 되는 자리라 무채색 계열 하나
+// 섞어서(soft) 공격성이 "나쁜 색"으로 안 보이게 함.
+const CATEGORY_TREND_COLORS: Record<StatCategoryScoreResponse['category'], string> = {
+  ACCURACY: 'var(--amber)',
+  COMPOSURE: 'var(--green)',
+  AGGRESSIVENESS: 'var(--soft)',
+};
+
+// 완료된 세션들(최신순으로 옴)을 오래된 순으로 뒤집고, 세션마다 8개 세부 지표를
+// CATEGORY_MEMBER_KEYS로 묶어 3분류 평균을 내서 회차별 추이 데이터로 만듦 — 백엔드가
+// 세션별 3분류 값을 따로 내려주진 않아서(세부 지표만 옴) 프론트에서 같은 매핑으로 계산.
+// 라벨은 overview.categories(현재 스탯 요약에 이미 와있는 3분류 라벨)를 그대로 재사용.
+function buildCategoryTrend(history: SessionHistoryItemResponse[], categories: StatCategoryScoreResponse[]): StatTrendSeries[] {
+  const chronological = [...history].reverse();
+  return categories.map((cat) => {
+    const memberKeys = CATEGORY_MEMBER_KEYS[cat.category];
+    return {
+      key: cat.category,
+      label: cat.label,
+      color: CATEGORY_TREND_COLORS[cat.category],
+      values: chronological.map((h) => {
+        const scores = memberKeys.map((k) => h.stats.find((s) => s.statKey === k)?.scorePct).filter((v): v is number => v != null);
+        return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+      }),
+    };
+  });
+}
 
 // 모의투자 세션을 마칠 때마다 AI가 채점하는 8개 세부 지표를 정확성/침착성/공격성 3개
 // 성향으로 묶어 평균 낸 값 — 사전조사 결과(진단 탭)와 다르게 세션이 없으면 보여줄 게
@@ -499,31 +520,6 @@ function StatsTab() {
         </div>
       )}
 
-      {overview && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, width: '100%' }}>
-          {overview.categories.map((cat) => {
-            // 정확성·침착성은 높을수록 좋음(초록↔빨강), 공격성은 좋고 나쁨이 아닌 성향(중립색).
-            const tone = cat.higherIsBetter
-              ? cat.scorePct >= 70
-                ? 'var(--green)'
-                : cat.scorePct < 40
-                ? 'var(--red)'
-                : 'var(--amber)'
-              : 'var(--soft)';
-            return (
-              <div key={cat.category} className="result-card" style={{ padding: 18, textAlign: 'left' }}>
-                <span className="result-tag">{cat.label}</span>
-                <h3 style={{ margin: '8px 0 4px', fontSize: 26, color: tone }}>{cat.scorePct}점</h3>
-                <div style={{ height: 6, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden', margin: '4px 0 8px' }}>
-                  <div style={{ width: `${cat.scorePct}%`, height: '100%', borderRadius: 999, background: tone }} />
-                </div>
-                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>{cat.description}</p>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
         완료한 모의고사 {sessionCount}회{quizCount > 0 ? ` · 푼 퀴즈 ${quizCount}개` : ''}의 결과를 합쳐 지표별 평균을 냈어요. 더 진행하면 계속
         업데이트돼요.
@@ -533,30 +529,21 @@ function StatsTab() {
           <StatTriangleChart points={chartPoints} />
         </div>
       )}
-      <div className="result-grid" style={{ width: '100%', textAlign: 'left', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {STAT_KEYS.map((key) => {
-          const { label, suffix, desc } = SESSION_STAT_LABELS[key];
-          const stat = stats.find((s) => s.statKey === key);
-          return (
-            <div className="result-card" key={key}>
-              <span className="result-tag">{label}</span>
-              <h3>{stat ? `${stat.avgScorePct}${suffix}` : '-'}</h3>
-              <p>{desc}</p>
-              {stat && (
-                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)' }}>
-                  모의고사 {stat.sessionCount}회{stat.quizCount > 0 ? ` · 퀴즈 ${stat.quizCount}개` : ''} 기준
-                </p>
-              )}
-              {stat?.latestNote && (
-                // AI가 채점하며 남긴 판단근거 — 점수만으로는 왜 이 점수인지 알 수 없어서 근거를 같이 보여줌.
-                <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-                  근거: {stat.latestNote}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
+
+      {/* 사전조사(온보딩) 결과가 아니라 여기(행동 스탯)에 둔 이유 — 또래 비교는 리스크
+          성향(공격성) 얘기라 스탯 탭의 3분류/8지표 바로 옆에 있는 게 맥락이 맞음. */}
+      <PeerComparisonCard />
+
+      {/* 3개 대분류 카드를 뒤집으면(flip) 그 카테고리를 구성하는 세부 지표가 뒷면에 나옴 —
+          "8개 지표를 평균 낸 게 3종"이라는 구성 관계를 카드 앞/뒤로 표현
+          (구성 관계는 CATEGORY_MEMBER_KEYS = 백엔드 StatCategoryCatalog와 동일한 매핑). */}
+      {overview && (
+        <div className="result-grid" style={{ width: '100%' }}>
+          {overview.categories.map((cat) => (
+            <CategoryFlipCard key={cat.category} cat={cat} stats={stats} />
+          ))}
+        </div>
+      )}
 
       {history.length > 0 && (
         <>
@@ -564,6 +551,15 @@ function StatsTab() {
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
             모의고사 한 회가 끝날 때마다 AI가 매매 기록과 판단 메모 전체를 읽고 채점한 결과예요.
           </p>
+          {history.length > 1 && (
+            <div className="result-card" style={{ padding: '20px 12px' }}>
+              <h3 style={{ margin: '0 0 4px', fontSize: 13, textAlign: 'center' }}>회차별 스탯 변화</h3>
+              <StatTrendChart
+                series={buildCategoryTrend(history, overview?.categories ?? [])}
+                xLabels={[...history].reverse().map((_, i) => `${i + 1}회`)}
+              />
+            </div>
+          )}
           {history.map((h) => {
             const isGain = h.returnPct >= 0;
             return (
@@ -611,13 +607,74 @@ function StatsTab() {
   );
 }
 
+// 정확성/침착성/공격성 카드 하나 — 앞면은 3종 점수, 뒤집으면(flip) 그 점수를 구성하는
+// 세부 지표(CATEGORY_MEMBER_KEYS)가 뒷면에 나옴. 카드마다 독립적으로 뒤집힘.
+function CategoryFlipCard({ cat, stats }: { cat: StatCategoryScoreResponse; stats: AggregateStatResponse[] }) {
+  const [flipped, setFlipped] = useState(false);
+  // 정확성·침착성은 높을수록 좋음(초록↔빨강), 공격성은 좋고 나쁨이 아닌 성향(중립색).
+  const tone = cat.higherIsBetter
+    ? cat.scorePct >= 70
+      ? 'var(--green)'
+      : cat.scorePct < 40
+      ? 'var(--red)'
+      : 'var(--amber)'
+    : 'var(--soft)';
+  const memberKeys = CATEGORY_MEMBER_KEYS[cat.category];
+
+  return (
+    <div className="category-flip-wrap">
+      <div className={`category-flip-card${flipped ? ' is-flipped' : ''}`}>
+        {/* 앞면 — 카테고리 점수 */}
+        <div className="category-flip-face">
+          <span className="result-tag">{cat.label}</span>
+          <h3 style={{ margin: '4px 0 0', fontSize: 26, color: tone }}>{cat.scorePct}점</h3>
+          <div style={{ height: 6, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden' }}>
+            <div style={{ width: `${cat.scorePct}%`, height: '100%', borderRadius: 999, background: tone }} />
+          </div>
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>{cat.description}</p>
+          <button className="category-flip-btn" onClick={() => setFlipped(true)}>
+            세부 지표 {memberKeys.length}개 보기 ›
+          </button>
+        </div>
+
+        {/* 뒷면 — 이 카테고리를 구성하는 세부 지표들. desc(지표 설명)는 label로 이미 알 수 있는
+            내용이라 빼고, AI가 채점하며 남긴 판단근거(latestNote)만 보여줌 — 글자 수를 줄이고
+            실제로 궁금한 "왜 이 점수인지"에 집중. 근거가 아직 없으면(세션 전) desc로 대체. */}
+        <div className="category-flip-face category-flip-back">
+          <span className="result-tag">{cat.label} 세부 지표</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {memberKeys.map((key) => {
+              const { label, suffix, desc } = SESSION_STAT_LABELS[key];
+              const stat = stats.find((s) => s.statKey === key);
+              return (
+                <div key={key} style={{ borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14.5, fontWeight: 700 }}>
+                    <span>{label}</span>
+                    <span>{stat ? `${stat.avgScorePct}${suffix}` : '-'}</span>
+                  </div>
+                  <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+                    {stat?.latestNote ? `근거: ${stat.latestNote}` : desc}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          <button className="category-flip-btn" onClick={() => setFlipped(false)}>
+            ‹ 요약으로
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 설문 기반 정확성/침착성/공격성 초기 스탯 카드 — 마이페이지 스탯 탭(행동 기반)과 같은
 // 3분류 언어를 사전조사 결과에서도 미리 보여줌. 공격성은 좋고 나쁨이 아니라 성향이라 중립색.
 function InitialCategoryCards({ scores }: { scores: InvestorProfileResponse['initialCategoryScores'] }) {
   if (!scores || scores.length === 0) return null;
   return (
     <div style={{ width: '100%', textAlign: 'left' }}>
-      <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: 'var(--soft)' }}>
+      <p style={{ margin: '0 0 10px', fontSize: 13.5, fontWeight: 700, color: 'var(--soft)' }}>
         설문으로 추정한 초기 스탯 — 모의고사를 진행하면 실제 행동 기반으로 업데이트돼요
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
@@ -630,13 +687,13 @@ function InitialCategoryCards({ scores }: { scores: InvestorProfileResponse['ini
               : 'var(--amber)'
             : 'var(--soft)';
           return (
-            <div key={cat.category} className="result-card" style={{ padding: 16 }}>
+            <div key={cat.category} className="result-card" style={{ padding: 18 }}>
               <span className="result-tag">{cat.label}</span>
-              <h3 style={{ margin: '6px 0 4px', fontSize: 24, color: tone }}>{cat.scorePct}점</h3>
+              <h3 style={{ margin: '8px 0 4px', fontSize: 26, color: tone }}>{cat.scorePct}점</h3>
               <div style={{ height: 6, borderRadius: 999, background: 'var(--chip)', overflow: 'hidden', margin: '4px 0 8px' }}>
                 <div style={{ width: `${cat.scorePct}%`, height: '100%', borderRadius: 999, background: tone }} />
               </div>
-              <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>{cat.description}</p>
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>{cat.description}</p>
             </div>
           );
         })}
