@@ -1,9 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import useLoggedIn from './useLoggedIn';
 import { getProductTourStatus, markProductTourSeen } from '../lib/user-api';
+
+// 사전 조사(KnowerBot 채팅) 진행 중에는 투어를 시작하지 않음 — 둘 다 페이지 이동/오버레이를
+// 스스로 제어하려고 해서 동시에 뜨면 화면이 겹쳐 보임(투어 1스텝이 /simulation으로
+// 강제 이동시켜 사전 조사 대화를 끊어버림).
+const ONBOARDING_PATHS = ['/onboarding', '/onboarding/result'];
 
 declare global {
   interface Window {
@@ -72,20 +77,21 @@ const STEPS: TourStep[] = [
 // 정확히 한 번만 보여줌.
 export default function ProductTour() {
   const router = useRouter();
+  const pathname = usePathname();
   const loggedIn = useLoggedIn();
   const [stepIndex, setStepIndex] = useState(-1);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const checkedRef = useRef(false);
 
   useEffect(() => {
-    if (!loggedIn || checkedRef.current) return;
+    if (!loggedIn || checkedRef.current || ONBOARDING_PATHS.includes(pathname)) return;
     checkedRef.current = true;
     getProductTourStatus()
       .then((status) => {
         if (!status.seen) setStepIndex(0);
       })
       .catch(() => {});
-  }, [loggedIn]);
+  }, [loggedIn, pathname]);
 
   // 스텝이 바뀔 때마다 그 스텝의 실제 페이지로 이동 — 이동 직후엔 새 페이지가 아직
   // 렌더링되기 전이라 타겟 탭이 DOM에 없을 수 있어서, 나타날 때까지 지켜보다가 잡음.
