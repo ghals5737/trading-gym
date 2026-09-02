@@ -11,7 +11,7 @@ if ! swapon --show | grep -q swapfile; then
 fi
 
 # 2) 런타임: Java 21 + Node 20 + Python 3.11 + nginx + git
-dnf install -y java-21-amazon-corretto-headless nodejs20 nodejs20-npm python3.11 python3.11-pip nginx git
+dnf install -y java-21-amazon-corretto-devel nodejs20 nodejs20-npm python3.11 python3.11-pip nginx git
 ln -sf /usr/bin/node-20 /usr/bin/node 2>/dev/null || true
 ln -sf /usr/bin/npm-20 /usr/bin/npm 2>/dev/null || true
 
