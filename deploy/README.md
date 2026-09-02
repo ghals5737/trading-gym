@@ -24,7 +24,10 @@ cd backend && ./gradlew clean bootJar && cd ..
 cd knowerbot-demo && npm ci && NEXT_PUBLIC_API_BASE="" npm run build && cd ..
 
 # 4) RAG 서버 준비 (임베딩 모델은 첫 실행 때 자동 다운로드 ~500MB)
-cd edu-rag-indexer && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+#    ⚠ torch는 반드시 CPU 전용으로 먼저 — 기본 설치는 CUDA(GPU) 라이브러리 수 GB를 받아 디스크가 참
+cd edu-rag-indexer && python3.11 -m venv .venv
+.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/pip install -r requirements.txt && cd ..
 
 # 5) 시크릿 env 파일 2개 (chmod 600)
 cat > backend.env <<ENV
@@ -62,6 +65,9 @@ sudo systemctl restart tg-backend tg-frontend
 - 끄기: EC2 중지(디스크 요금만) · RDS도 안 쓸 땐 중지 가능(7일 후 자동 재시작 유의)
 
 ## 트러블슈팅
+- pip 설치 중 "No space left on device": CUDA용 torch를 받다 디스크가 찬 것 —
+  `.venv/bin/pip cache purge` 후 venv 지우고 위의 CPU 전용 순서로 재설치.
+  루트 볼륨이 8GB면 20GB로 확장 권장(EBS 수정 → `sudo growpart /dev/xvda 1 && sudo xfs_growfs /`)
 - 빌드 중 멈춤/죽음: 스왑 확인(`swapon --show`), 빌드는 한 번에 하나씩
 - 502: 해당 서비스 로그 `journalctl -u tg-backend -n 50` (frontend/rag 동일)
 - 검색이 첫 요청만 느림: 임베딩 모델 로드 중 — 정상
