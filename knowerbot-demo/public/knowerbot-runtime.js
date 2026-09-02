@@ -33,7 +33,7 @@ const ANIMATION_URLS = {
 // listens on 0.0.0.0.
 // 배포에서는 layout.tsx가 window.KNOWERBOT_API_BASE(=NEXT_PUBLIC_API_BASE)를 먼저 심어줌 —
 // 정적 파일이라 process.env를 직접 못 읽어서 window 전역으로 전달받는다. 미설정이면 로컬 가정.
-const API_BASE = window.KNOWERBOT_API_BASE || `${window.location.protocol}//${window.location.hostname}:8079`;
+const API_BASE = window.KNOWERBOT_API_BASE !== undefined ? window.KNOWERBOT_API_BASE : `${window.location.protocol}//${window.location.hostname}:8079`;
 const ACCESS_TOKEN_KEY = 'kg_access_token';
 const REFRESH_TOKEN_KEY = 'kg_refresh_token';
 

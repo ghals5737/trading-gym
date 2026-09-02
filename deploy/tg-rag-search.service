@@ -1,5 +1,4 @@
-# /etc/systemd/system/tg-rag-search.service
-# RAG 검색 서버(edu-rag-indexer/web_search.py) — 임베딩 모델을 상주시키는 프로세스
+# /etc/systemd/system/tg-rag-search.service — RAG 검색 서버 (:8123, 내부 전용)
 [Unit]
 Description=Trading Gym RAG search server
 After=network-online.target
@@ -8,7 +7,8 @@ Wants=network-online.target
 [Service]
 User=ec2-user
 WorkingDirectory=/home/ec2-user/trading-gym/edu-rag-indexer
-# DATABASE_URL은 RDS로 — 예: postgresql://hrbc:<비밀번호>@snsb-dev....rds.amazonaws.com:5432/tg
+# /home/ec2-user/trading-gym/rag.env 내용 예:
+#   DATABASE_URL=postgresql://hrbc:<비밀번호>@snsb-dev....rds.amazonaws.com:5432/tg
 EnvironmentFile=/home/ec2-user/trading-gym/rag.env
 ExecStart=/home/ec2-user/trading-gym/edu-rag-indexer/.venv/bin/python web_search.py
 Restart=on-failure

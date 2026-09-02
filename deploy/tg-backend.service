@@ -1,5 +1,4 @@
-# /etc/systemd/system/tg-backend.service
-# 설치: sudo cp tg-backend.service /etc/systemd/system/ && sudo systemctl enable --now tg-backend
+# /etc/systemd/system/tg-backend.service — Spring Boot 백엔드 (:8079)
 [Unit]
 Description=Trading Gym backend (Spring Boot)
 After=network-online.target
@@ -13,10 +12,9 @@ WorkingDirectory=/home/ec2-user/trading-gym
 #   DB_PASSWORD=...
 #   OPENAI_API_KEY=...
 #   AI_PROVIDER=openai
-#   CORS_ALLOWED_ORIGINS=https://trading-gym.pages.dev
 EnvironmentFile=/home/ec2-user/trading-gym/backend.env
-# t3.medium(4GB) 기준 힙 제한 — 파이썬 임베딩 서버와 공존해야 해서 JVM이 다 먹지 않게
-ExecStart=/usr/bin/java -Xms256m -Xmx768m -jar /home/ec2-user/trading-gym/trading-gym-backend-0.1.0.jar
+# t3.medium(4GB)에서 프론트·파이썬과 공존해야 해서 JVM 힙 제한
+ExecStart=/usr/bin/java -Xms256m -Xmx768m -jar /home/ec2-user/trading-gym/backend/build/libs/trading-gym-backend-0.1.0.jar
 Restart=on-failure
 RestartSec=5
 

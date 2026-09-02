@@ -1,0 +1,15 @@
+# /etc/systemd/system/tg-frontend.service — Next.js 프론트 (next start :8088)
+[Unit]
+Description=Trading Gym frontend (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/trading-gym/knowerbot-demo
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

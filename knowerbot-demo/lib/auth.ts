@@ -7,9 +7,13 @@ const LOGGED_IN_KEY = 'kg_logged_in';
 
 export function apiBaseUrl(): string {
   // Keep in sync with API_BASE in public/knowerbot-runtime.js.
-  // 배포(프론트=Cloudflare, 백엔드=EC2)에서는 빌드 시 NEXT_PUBLIC_API_BASE로 백엔드 주소를
-  // 주입함(예: https://api.example.com). 미설정이면 로컬 개발 가정(같은 호스트의 :8079).
-  return process.env.NEXT_PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8079`;
+  // 배포에서는 빌드 시 NEXT_PUBLIC_API_BASE로 백엔드 주소를 주입함.
+  //  - 통짜 EC2(nginx가 /api를 백엔드로 프록시): 빈 문자열("")로 주입 → 상대경로(/api/...) 호출
+  //  - 분리 배포: 절대주소(예: https://api.example.com)로 주입
+  // 아예 미설정이면 로컬 개발 가정(같은 호스트의 :8079). ||가 아니라 undefined 체크인 이유:
+  // 빈 문자열("")도 "같은 오리진"이라는 유효한 설정값이라서.
+  const base = process.env.NEXT_PUBLIC_API_BASE;
+  return base !== undefined ? base : `${window.location.protocol}//${window.location.hostname}:8079`;
 }
 
 export function getAccessToken(): string | null {
