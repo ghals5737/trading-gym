@@ -15,3 +15,6 @@ node_modules/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# 기계별 JDK 경로 — 커밋 금지
+backend/gradle.properties

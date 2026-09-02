@@ -1,0 +1,2 @@
+# 기계별 JDK 경로(org.gradle.java.home)는 여기 말고 ~/.gradle/gradle.properties 에 —
+# 저장소에 커밋하면 다른 머신(EC2 등)에서 빌드가 깨진다. 툴체인이 JDK 21을 알아서 찾는다.
